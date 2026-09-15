@@ -52,7 +52,7 @@ go install github.com/siner308/sims/cmd/sims@latest
 
 ### What sims needs on the machine
 
-`sims doctor` checks every tool below and prints how to get the missing ones; `install.sh` runs it at the end. Either platform is enough; the header shows what was found.
+`sims doctor` probes every tool below, printing each line as it finishes (the first `xcrun` call after installing or updating Xcode can take a minute), and ends with a copy-paste block of the commands that install whatever is missing; `install.sh` runs it at the end. Either platform is enough; the header shows what was found.
 
 ```
 $ sims doctor
@@ -61,15 +61,23 @@ android
   ok       Android SDK    /Users/me/Library/Android/sdk
   ok       adb            /Users/me/Library/Android/sdk/platform-tools/adb (36.0.0)
   ok       emulator       /Users/me/Library/Android/sdk/emulator/emulator
-  MISSING  avdmanager     install cmdline-tools into <sdk>/cmdline-tools/latest
-  MISSING  sdkmanager     install cmdline-tools into <sdk>/cmdline-tools/latest
-  skip     aapt2          optional: sdkmanager "build-tools;35.0.0" (app names fall back to package ids without it)
+  MISSING  avdmanager     command line tools missing
+  MISSING  sdkmanager     command line tools missing
+  skip     aapt2          optional: build-tools missing; app names fall back to package ids
 ios
   ok       xcrun          /usr/bin/xcrun
   ok       Xcode          26.6
   ok       simctl         xcrun simctl
   ok       devicectl      xcrun devicectl
-  skip     idevicesyslog  optional: brew install libimobiledevice (needed for logs from physical iPhones)
+  skip     idevicesyslog  optional: needed only for logs from physical iPhones
+
+to install what is missing:
+# avdmanager
+brew install --cask android-commandlinetools   # or unzip Google's commandlinetools zip into <sdk>/cmdline-tools/latest
+# aapt2
+sdkmanager "build-tools;35.0.0"
+# idevicesyslog
+brew install libimobiledevice
 ```
 
 | Platform | Needs | How sims finds it |
@@ -154,7 +162,7 @@ avdmanager writes `hw.keyboard = no` (the emulator default). With that setting t
 
 ## Physical ios
 
-Devices show up from `devicectl list devices` once they have been paired. Select an `Unpaired` one and press `p` to run `devicectl manage pair`; the phone shows a trust prompt.
+Devices show up from `devicectl list devices` once they have been paired. Select an `Unpaired` one and press `p`: sims shows the checklist (Developer Mode on, phone unlocked, plugged in over USB for a phone this Mac has never seen), then runs `devicectl manage pair` and the phone shows a pairing prompt. Apple's own steps start with a cable too ([Pair a wireless device with Xcode](https://help.apple.com/xcode/mac/current/en.lproj/devbc48d1bad.html)); after that first pairing, unplug it and use `w` from the same wifi.
 
 A paired phone on the same wifi shows as `Offline` until a CoreDevice tunnel is open, and the tunnel is opened lazily by the first command that addresses the device. Select it and press `w`: sims runs `devicectl device info details --device <id>`, which brings the state to `Connected` in a few seconds. No Xcode project needed. Requirements on the phone: unlocked, Developer Mode on, same network as the Mac (or plugged in over USB).
 

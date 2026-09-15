@@ -16,8 +16,12 @@ type stub struct {
 	checks   []device.Check
 }
 
-func (s stub) Platform() device.Platform                                 { return s.platform }
-func (s stub) Checks(context.Context) []device.Check                     { return s.checks }
+func (s stub) Platform() device.Platform { return s.platform }
+func (s stub) Checks(_ context.Context, emit func(device.Check)) {
+	for _, c := range s.checks {
+		emit(c)
+	}
+}
 func (s stub) Available() error                                          { return nil }
 func (s stub) List(context.Context) ([]device.Device, error)             { return nil, nil }
 func (s stub) Boot(context.Context, device.Device) error                 { return nil }
@@ -42,11 +46,12 @@ func TestRun_ReportsMissingAndOptional(t *testing.T) {
 	var out bytes.Buffer
 	ok := doctor.Run(t.Context(), &out, stub{platform: device.PlatformAndroid, checks: []device.Check{
 		{Name: "adb", OK: true, Found: "/sdk/platform-tools/adb"},
-		{Name: "avdmanager", OK: false, Hint: "install cmdline-tools"},
-		{Name: "aapt2", OK: false, Optional: true, Hint: "sdkmanager build-tools"},
+		{Name: "avdmanager", OK: false, Hint: "install cmdline-tools", Fix: "brew install --cask android-commandlinetools"},
+		{Name: "aapt2", OK: false, Optional: true, Hint: "sdkmanager build-tools", Fix: `sdkmanager "build-tools;35.0.0"`},
 	}})
 	text := out.String()
-	for _, want := range []string{"android", "ok       adb", "MISSING  avdmanager     install cmdline-tools", "skip     aapt2          optional: sdkmanager build-tools"} {
+	for _, want := range []string{"android", "ok       adb", "MISSING  avdmanager     install cmdline-tools", "skip     aapt2          optional: sdkmanager build-tools",
+		"to install what is missing:", "# avdmanager\nbrew install --cask android-commandlinetools", "# aapt2\nsdkmanager \"build-tools;35.0.0\""} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q in:\n%s", want, text)
 		}

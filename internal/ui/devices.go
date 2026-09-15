@@ -343,6 +343,9 @@ func (v *devicesView) openApps() {
 		if d.Platform == device.PlatformIOS && d.State == device.StateOffline {
 			hint = "press w to open the wifi tunnel"
 		}
+		if d.Platform == device.PlatformIOS && d.State == device.StateUnpaired {
+			hint = "press p to pair it (USB the first time)"
+		}
 		v.app.flashErr(fmt.Errorf("%s is %s; %s", d.Name, strings.ToLower(string(d.State)), hint))
 		return
 	}
@@ -477,12 +480,20 @@ func (v *devicesView) pair() {
 		v.app.flashErr(fmt.Errorf("%s pairs with :pair HOST:PORT CODE", d.Platform))
 		return
 	}
-	v.app.status.SetText(" pairing " + d.Name + ": accept the trust prompt on the device...")
-	v.app.async(func() error { return pairer.PairDevice(v.app.ctx, d) }, func() {
-		v.app.flash("paired " + d.Name)
-		v.Refresh()
+	v.app.confirm(fmt.Sprintf("pair %s?\n\n%s", d.Name, pairingGuide), func() {
+		v.app.status.SetText(" pairing " + d.Name + ": accept the prompt on the phone (up to 2 minutes)...")
+		v.app.async(func() error { return pairer.PairDevice(v.app.ctx, d) }, func() {
+			v.app.flash("paired " + d.Name + "; unplug it and use w to reach it over wifi")
+			v.Refresh()
+		})
 	})
 }
+
+// Apple's pairing steps: the first pairing goes over a cable, wifi comes after.
+const pairingGuide = "Before answering yes:\n" +
+	"1. Developer Mode is on (Settings > Privacy & Security > Developer Mode) and the phone is unlocked\n" +
+	"2. For a phone this Mac has never seen, it is plugged in over USB and you tapped Trust\n" +
+	"3. Then accept the pairing prompt that appears on the phone"
 
 func (v *devicesView) act(verb string, dangerous bool, fn func(device.Provider, device.Device) error) {
 	d, ok := v.selected()
