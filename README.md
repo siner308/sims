@@ -36,13 +36,13 @@ Windows: download `sims_windows_amd64.zip` (or `arm64`) from the [releases page]
 
 Manual download for any OS: every release ships `sims_<os>_<arch>.tar.gz` (`.zip` on Windows) plus `checksums.txt`.
 
-With a Go toolchain:
+With a Go toolchain (the module is public, so this works from any machine, mirrors included):
 
 ```sh
 go install github.com/siner308/sims/cmd/sims@latest
 ```
 
-`sims --version` prints the installed version.
+`sims --version` prints the installed version, from the release build or from the module version `go install` fetched.
 
 ### What sims needs on the machine
 
@@ -115,4 +115,4 @@ go test ./... -race    # parsers run everywhere; provider and UI tests skip when
 GOOS=windows go build ./cmd/sims
 ```
 
-Releases are cut by tagging: `git tag v0.1.0 && git push origin v0.1.0` runs GoReleaser in GitHub Actions and publishes the archives and `checksums.txt` that `install.sh` downloads.
+Releases are cut by tagging: `git tag v0.1.0 && git push origin v0.1.0` runs GoReleaser in GitHub Actions and publishes the archives and `checksums.txt` that `install.sh` downloads. GoReleaser releases to whichever repo runs the workflow, so a mirror that receives the tag gets its own release.

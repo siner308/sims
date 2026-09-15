@@ -45,8 +45,5 @@ changelog:
       - "^chore:"
 
 release:
-  github:
-    owner: siner308
-    name: sims
   draft: false
   prerelease: auto
