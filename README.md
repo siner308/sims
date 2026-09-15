@@ -32,7 +32,7 @@ No toolchain needed; grab the binary for your machine.
 curl -fsSL https://raw.githubusercontent.com/siner308/sims/main/install.sh | sh
 ```
 
-The script asks GitHub for the latest release, so this line never needs updating. Two optional knobs: `SIMS_VERSION=<tag>` installs a specific release and `SIMS_INSTALL_DIR=<dir>` picks the directory.
+The script downloads through GitHub's `releases/latest/download` redirect, so this line never needs updating and it does not touch the rate-limited API. Two optional knobs: `SIMS_VERSION=<tag>` installs a specific release and `SIMS_INSTALL_DIR=<dir>` picks the directory.
 
 ```sh
 SIMS_VERSION=<tag> SIMS_INSTALL_DIR="$HOME/bin" sh -c "$(curl -fsSL https://raw.githubusercontent.com/siner308/sims/main/install.sh)"

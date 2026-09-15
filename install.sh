@@ -26,9 +26,12 @@ case "$arch" in
   *) echo "install.sh: unsupported arch $arch" >&2; exit 1 ;;
 esac
 
+# "latest" goes through GitHub's releases/latest/download redirect, which needs no API call
+# and so is not subject to the unauthenticated API rate limit.
 if [ "$VERSION" = "latest" ]; then
-  VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
-  [ -n "$VERSION" ] || { echo "install.sh: could not resolve the latest release" >&2; exit 1; }
+  base="https://github.com/$REPO/releases/latest/download"
+else
+  base="https://github.com/$REPO/releases/download/$VERSION"
 fi
 
 if [ -z "$INSTALL_DIR" ]; then
@@ -37,13 +40,13 @@ fi
 mkdir -p "$INSTALL_DIR"
 
 asset="sims_${os}_${arch}.tar.gz"
-url="https://github.com/$REPO/releases/download/$VERSION/$asset"
+url="$base/$asset"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 echo "downloading $url"
 curl -fsSL "$url" -o "$tmp/$asset"
-curl -fsSL "https://github.com/$REPO/releases/download/$VERSION/checksums.txt" -o "$tmp/checksums.txt"
+curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt"
 if command -v shasum >/dev/null 2>&1; then
   (cd "$tmp" && grep " $asset\$" checksums.txt | shasum -a 256 -c - >/dev/null) || { echo "install.sh: checksum mismatch" >&2; exit 1; }
 elif command -v sha256sum >/dev/null 2>&1; then
@@ -52,7 +55,7 @@ fi
 tar -xzf "$tmp/$asset" -C "$tmp" sims
 install -m 0755 "$tmp/sims" "$INSTALL_DIR/sims"
 
-echo "installed sims $VERSION to $INSTALL_DIR/sims"
+echo "installed $("$INSTALL_DIR/sims" --version) to $INSTALL_DIR/sims"
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) echo "add $INSTALL_DIR to your PATH, e.g. export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
