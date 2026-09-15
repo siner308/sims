@@ -31,21 +31,33 @@ type coreDevice struct {
 		ProductType   string `json:"productType"`
 		Platform      string `json:"platform"`
 		UDID          string `json:"udid"`
+		Reality       string `json:"reality"`
 	} `json:"hardwareProperties"`
 }
 
-func parseCoreDevices(raw []byte) ([]device.Device, error) {
+// Newer devicectl lists simulators as CoreDevices too ("reality": "simulated"), paired but never
+// tunnelled. They are not physical devices: unpair is unsupported on them and a connect attempt
+// succeeds without changing anything. simctl owns those rows; only their connection dates are kept,
+// because simctl reports no lastBootedAt for them.
+func parseCoreDevices(raw []byte) ([]device.Device, map[string]time.Time, error) {
 	var payload struct {
 		Result struct {
 			Devices []coreDevice `json:"devices"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var devices []device.Device
+	simLastSeen := map[string]time.Time{}
 	for _, cd := range payload.Result.Devices {
 		if cd.HardwareProperties.Platform != "iOS" {
+			continue
+		}
+		if cd.HardwareProperties.Reality == "simulated" {
+			if t := cd.ConnectionProperties.LastConnectionDate; !t.IsZero() {
+				simLastSeen[cd.HardwareProperties.UDID] = t
+			}
 			continue
 		}
 		d := device.Device{
@@ -77,7 +89,7 @@ func parseCoreDevices(raw []byte) ([]device.Device, error) {
 		devices = append(devices, d)
 	}
 	sort.Slice(devices, func(i, j int) bool { return devices[i].Name < devices[j].Name })
-	return devices, nil
+	return devices, simLastSeen, nil
 }
 
 // devicectl only writes machine-readable output to a file, so every call goes through a temp path.
@@ -97,13 +109,13 @@ func devicectlJSON(ctx context.Context, args ...string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func (p *Provider) physicalDevices(ctx context.Context) ([]device.Device, error) {
+func (p *Provider) physicalDevices(ctx context.Context) ([]device.Device, map[string]time.Time, error) {
 	if _, err := exec.LookPath("xcrun"); err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	raw, err := devicectlJSON(ctx, "list", "devices")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return parseCoreDevices(raw)
 }

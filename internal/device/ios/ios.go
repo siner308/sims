@@ -106,9 +106,14 @@ func (p *Provider) List(ctx context.Context) ([]device.Device, error) {
 		}
 		return devices[i].Name < devices[j].Name
 	})
-	physical, err := p.physicalDevices(ctx)
+	physical, simLastSeen, err := p.physicalDevices(ctx)
 	if err != nil {
 		return devices, err
+	}
+	for i := range devices {
+		if t := simLastSeen[devices[i].ID]; t.After(devices[i].LastActiveAt) {
+			devices[i].LastActiveAt = t
+		}
 	}
 	return append(devices, physical...), nil
 }

@@ -34,18 +34,27 @@ const coreDevicesFixture = `{
         "deviceProperties": {"name": "watch"},
         "connectionProperties": {"pairingState": "paired", "tunnelState": "unavailable"},
         "hardwareProperties": {"productType": "Watch6,12", "platform": "watchOS", "udid": "00008301-000000000000004E"}
+      },
+      {
+        "identifier": "513A49F9-427C-4EE9-AD64-C6B52B4AC716",
+        "deviceProperties": {"name": "iPad Air 11-inch (M2)", "osVersionNumber": "18.2"},
+        "connectionProperties": {"pairingState": "paired", "transportType": "sameMachine", "tunnelState": "disconnected", "lastConnectionDate": "2026-06-06T10:00:00.000Z"},
+        "hardwareProperties": {"marketingName": "iPad Air 11-inch (M2)", "productType": "iPad14,8", "platform": "iOS", "udid": "513A49F9-427C-4EE9-AD64-C6B52B4AC716", "reality": "simulated"}
       }
     ]
   }
 }`
 
 func TestParseCoreDevices(t *testing.T) {
-	devices, err := parseCoreDevices([]byte(coreDevicesFixture))
+	devices, simLastSeen, err := parseCoreDevices([]byte(coreDevicesFixture))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(devices) != 3 {
-		t.Fatalf("got %d devices, want 3 (watchOS filtered out)", len(devices))
+		t.Fatalf("got %d devices, want 3 (watchOS and the simulator filtered out)", len(devices))
+	}
+	if got := simLastSeen["513A49F9-427C-4EE9-AD64-C6B52B4AC716"]; got.IsZero() || got.Year() != 2026 || got.Month() != 6 {
+		t.Errorf("simulator connection date not kept: %v", got)
 	}
 	byName := map[string]device.Device{}
 	for _, d := range devices {
