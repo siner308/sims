@@ -438,6 +438,33 @@ func TestRenderHints_Columns(t *testing.T) {
 	}
 }
 
+func TestRenderHints_GroupsStartNewColumns(t *testing.T) {
+	hints := []hint{{"a", "1"}, {"b", "2"}, groupBreak, {"c", "3"}, groupBreak, {"d", "4"}, {"e", "5"}, {"f", "6"}, {"g", "7"}}
+	lines := strings.Split(strings.TrimRight(renderHints(hints, 3), "\n"), "\n")
+	// row 0 holds the first key of every column: a | c | d | g (d..f fill one column, g spills to the next)
+	for _, k := range []string{"<a>", "<c>", "<d>", "<g>"} {
+		if !strings.Contains(lines[0], k) {
+			t.Errorf("row 0 missing %s: %q", k, lines[0])
+		}
+	}
+	if strings.Contains(lines[2], "<c>") || strings.Contains(lines[0], "<b>") {
+		t.Errorf("group members leaked across columns: %q / %q", lines[0], lines[2])
+	}
+}
+
+func TestDevicesHints_NoDuplicates(t *testing.T) {
+	seen := map[string]bool{}
+	for _, h := range newDevicesView(New("t")).Hints() {
+		if h.isBreak() {
+			continue
+		}
+		if seen[h.key] {
+			t.Errorf("key %q listed twice", h.key)
+		}
+		seen[h.key] = true
+	}
+}
+
 func TestHumanBytes(t *testing.T) {
 	cases := map[uint64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KiB", 3 << 30: "3.0 GiB", 1536 << 20: "1.5 GiB"}
 	for in, want := range cases {

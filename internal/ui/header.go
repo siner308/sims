@@ -20,6 +20,11 @@ type hint struct {
 	label string
 }
 
+// groupBreak starts a new column in the hotkey block, so related keys stay together instead of wrapping.
+var groupBreak = hint{}
+
+func (h hint) isBreak() bool { return h.key == "" && h.label == "" }
+
 var globalHints = []hint{
 	{":", "command"}, {"?", "help"}, {"esc", "back"}, {"r", "refresh"}, {"ctrl+c", "quit"},
 }
@@ -94,7 +99,8 @@ func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]de
 // The panel is headerHeight lines tall, so usage goes last and everything above it is kept to three lines.
 func (h *header) draw(hints []hint) {
 	h.info.SetText(renderFacts(append(append([][2]string(nil), h.facts...), h.usage.facts()...)))
-	h.keys.SetText(renderHints(append(append([]hint(nil), hints...), globalHints...), headerHeight))
+	all := append(append([]hint(nil), hints...), groupBreak)
+	h.keys.SetText(renderHints(append(all, globalHints...), headerHeight))
 }
 
 func renderFacts(facts [][2]string) string {
@@ -109,27 +115,48 @@ func renderFacts(facts [][2]string) string {
 	return b.String()
 }
 
-// Columns fill top to bottom, so index i sits at column i/rows, row i%rows.
+// Each group gets its own column (or columns, when it has more than `rows` keys); a shorter
+// group leaves its column short instead of letting the next group flow into it.
 func renderHints(hints []hint, rows int) string {
-	if len(hints) == 0 {
+	var columns [][]hint
+	var cur []hint
+	flush := func() {
+		for len(cur) > rows {
+			columns = append(columns, cur[:rows])
+			cur = cur[rows:]
+		}
+		if len(cur) > 0 {
+			columns = append(columns, cur)
+		}
+		cur = nil
+	}
+	for _, hn := range hints {
+		if hn.isBreak() {
+			flush()
+			continue
+		}
+		cur = append(cur, hn)
+	}
+	flush()
+	if len(columns) == 0 {
 		return ""
 	}
-	cols := (len(hints) + rows - 1) / rows
-	keyWidth := make([]int, cols)
-	labelWidth := make([]int, cols)
-	for i, hn := range hints {
-		c := i / rows
-		keyWidth[c] = max(keyWidth[c], len(hn.key)+2)
-		labelWidth[c] = max(labelWidth[c], len(hn.label))
+	keyWidth := make([]int, len(columns))
+	labelWidth := make([]int, len(columns))
+	for c, col := range columns {
+		for _, hn := range col {
+			keyWidth[c] = max(keyWidth[c], len(hn.key)+2)
+			labelWidth[c] = max(labelWidth[c], len(hn.label))
+		}
 	}
 	var b strings.Builder
 	for r := 0; r < rows; r++ {
-		for c := 0; c < cols; c++ {
-			i := c*rows + r
-			if i >= len(hints) {
-				break
+		for c, col := range columns {
+			if r >= len(col) {
+				fmt.Fprintf(&b, "%-*s  ", keyWidth[c]+1+labelWidth[c], "")
+				continue
 			}
-			hn := hints[i]
+			hn := col[r]
 			fmt.Fprintf(&b, "[aqua]%-*s[-] [gray]%-*s[-]  ", keyWidth[c], "<"+tview.Escape(hn.key)+">", labelWidth[c], hn.label)
 		}
 		b.WriteString("\n")

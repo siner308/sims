@@ -24,7 +24,11 @@ func newHelpView(a *App) *helpView {
 	var resourceName string
 	if len(a.stack) > 0 {
 		resourceName = a.top().Name()
-		resource = a.top().Hints()
+		for _, h := range a.top().Hints() {
+			if !h.isBreak() {
+				resource = append(resource, h)
+			}
+		}
 	}
 	sections := []helpSection{
 		{strings.ToUpper(resourceName), resource},

@@ -32,7 +32,9 @@ func (v *appsView) Primitive() tview.Primitive { return v.table }
 func (v *appsView) Hints() []hint {
 	return []hint{
 		{"enter", "launch"}, {"i", "install (os dialog)"}, {"I", "install (tui picker)"}, {"ctrl+u", "uninstall"},
+		groupBreak,
 		{"s", "toggle preinstalled"}, {"l", "logs"}, {"/", "filter"},
+		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 	}
 }

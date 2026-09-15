@@ -63,13 +63,16 @@ func (v *devicesView) Name() string               { return "devices" }
 func (v *devicesView) Primitive() tview.Primitive { return v.table }
 func (v *devicesView) Hints() []hint {
 	return []hint{
-		{"b", "boot"}, {"ctrl+k", "shutdown"}, {"ctrl+e", "erase"}, {"ctrl+d", "delete"},
-		{"enter", "apps (boots first)"}, {"l", "logs"}, {"n", "new device"}, {"/", "filter"},
-		{"w", "wifi: android enable / ios connect"}, {"x", "disconnect wifi"}, {"p", "pair (ios)"},
+		{"enter", "apps (boots first)"}, {"l", "logs"}, {"b", "boot"},
+		{"ctrl+k", "shutdown"}, {"ctrl+e", "erase"}, {"ctrl+d", "delete"},
+		groupBreak,
+		{"n", "new device"}, {"/", "filter"}, {"p", "pair (ios)"},
+		{"w", "wifi: android enable / ios connect"}, {"x", "disconnect wifi"},
+		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
-		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
-		{"shift+n", "sort name"}, {"shift+s", "sort state"}, {"shift+l", "sort last"}, {"shift+r", "sort runtime"},
-		{"shift+p", "sort platform"}, {"shift+v", "sort via"}, {"shift+m", "sort model"},
+		groupBreak,
+		{"shift+n", "sort name"}, {"shift+s", "sort state"}, {"shift+l", "sort last"},
+		{"shift+r", "sort runtime"}, {"shift+p", "sort platform"}, {"shift+v", "sort via"}, {"shift+m", "sort model"},
 	}
 }
 
