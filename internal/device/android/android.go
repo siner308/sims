@@ -303,7 +303,8 @@ func (p *Provider) LogCmd(ctx context.Context, d device.Device, app *device.App)
 	if d.Serial == "" {
 		return nil, errors.New("device is not running")
 	}
-	args := []string{"-s", d.Serial, "logcat", "-v", "time"}
+	// the ring buffer holds ~100k lines on a busy emulator; the view keeps 5000, so do not ship the rest
+	args := []string{"-s", d.Serial, "logcat", "-v", "time", "-T", "2000"}
 	if app != nil {
 		out, err := run(ctx, p.sdk.adb(), "-s", d.Serial, "shell", "pidof", "-s", app.BundleID)
 		pid := strings.TrimSpace(out)

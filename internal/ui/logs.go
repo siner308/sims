@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -14,7 +15,10 @@ import (
 	"github.com/siner308/sims/internal/device"
 )
 
-const logBuffer = 5000
+const (
+	logBuffer    = 5000
+	pumpInterval = 100 * time.Millisecond
+)
 
 type logsView struct {
 	app    *App
@@ -27,6 +31,8 @@ type logsView struct {
 	filter string
 	paused bool
 	nowrap bool
+	// waiting is set while the runner shows in the status bar; only the UI goroutine touches it
+	waiting bool
 }
 
 func newLogsView(a *App, d device.Device, only *device.App) *logsView {
@@ -69,21 +75,63 @@ func (v *logsView) Refresh() {
 	}
 	v.text.Clear()
 	v.text.ScrollToEnd()
+	v.waiting = true
+	v.app.startSpinner(v.waitMsg())
 	go v.pump(out)
-	go func() { _ = cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		if ctx.Err() != nil {
+			return
+		}
+		v.app.tv.QueueUpdateDraw(func() {
+			v.settle()
+			if err != nil {
+				v.app.flashErr(fmt.Errorf("log stream ended: %w", err))
+			} else {
+				v.app.flash("log stream ended")
+			}
+		})
+	}()
+}
+
+func (v *logsView) waitMsg() string {
+	if v.only != nil {
+		return fmt.Sprintf("waiting for %s to log something on %s (nothing yet since the stream opened)", v.only.Name, v.dev.Name)
+	}
+	return fmt.Sprintf("waiting for the first log line from %s", v.dev.Name)
+}
+
+// settle takes the runner down once the stream produced something or went away.
+func (v *logsView) settle() {
+	if v.waiting {
+		v.waiting = false
+		v.app.stopSpinner()
+	}
 }
 
 func (v *logsView) stop() {
+	v.settle()
 	if v.cancel != nil {
 		v.cancel()
 		v.cancel = nil
 	}
 }
 
+// pump batches lines so a backlog does not redraw per line, but flushes on a timer too:
+// one app's logs may trickle in a line at a time and each must show right away.
 func (v *logsView) pump(r io.Reader) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	batch := make([]string, 0, 64)
+	lines := make(chan string, 1024)
+	go func() {
+		defer close(lines)
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	tick := time.NewTicker(pumpInterval)
+	defer tick.Stop()
+	batch := make([]string, 0, 256)
 	flush := func() {
 		if len(batch) == 0 {
 			return
@@ -92,16 +140,25 @@ func (v *logsView) pump(r io.Reader) {
 		batch = batch[:0]
 		v.app.tv.QueueUpdateDraw(func() { v.append(chunk) })
 	}
-	for sc.Scan() {
-		batch = append(batch, sc.Text())
-		if len(batch) >= 64 {
+	for {
+		select {
+		case l, ok := <-lines:
+			if !ok {
+				flush()
+				return
+			}
+			batch = append(batch, l)
+			if len(batch) >= 256 {
+				flush()
+			}
+		case <-tick.C:
 			flush()
 		}
 	}
-	flush()
 }
 
 func (v *logsView) append(chunk []string) {
+	v.settle()
 	v.mu.Lock()
 	v.lines = append(v.lines, chunk...)
 	if len(v.lines) > logBuffer {

@@ -1104,3 +1104,31 @@ func TestRenderRunner_FramesDiffer(t *testing.T) {
 		}
 	}
 }
+
+type logProvider struct {
+	fakeProvider
+	script string
+}
+
+func (p *logProvider) LogCmd(ctx context.Context, _ device.Device, _ *device.App) (*exec.Cmd, error) {
+	return exec.CommandContext(ctx, "sh", "-c", p.script), nil
+}
+
+func TestLogsView_RunnerUntilFirstLine(t *testing.T) {
+	p := &logProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid}, script: "sleep 0.4; echo hello; sleep 10"}
+	a := New("test", p)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	var lv *logsView
+	var busy int
+	onUI(a, func() {
+		lv = newLogsView(a, device.Device{Name: "dev", Platform: device.PlatformAndroid, State: device.StateBooted}, nil)
+		a.push(lv)
+		busy = a.busy
+	})
+	if busy == 0 {
+		t.Fatal("the runner should show while the stream is silent")
+	}
+	waitFor(t, a, 5*time.Second, func() bool { return a.busy == 0 && strings.Contains(lv.text.GetText(true), "hello") })
+	onUI(a, func() { lv.stop() })
+}
