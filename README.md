@@ -73,12 +73,14 @@ ios
 
 to install what is missing:
 # avdmanager
-brew install --cask android-commandlinetools   # or unzip Google's commandlinetools zip into <sdk>/cmdline-tools/latest
+unzip Google's commandlinetools zip into /Users/me/Library/Android/sdk/cmdline-tools/latest   # or: brew install --cask android-commandlinetools (then pass --sdk_root=/Users/me/Library/Android/sdk to sdkmanager)
 # aapt2
-sdkmanager "build-tools;35.0.0"
+sdkmanager --sdk_root=/Users/me/Library/Android/sdk "build-tools;35.0.0"
 # idevicesyslog
 brew install libimobiledevice
 ```
+
+The `sdkmanager` lines carry `--sdk_root` because `sdkmanager` installs into the SDK that contains the binary, not into `ANDROID_HOME`; the Homebrew cask keeps it under the brew prefix, so without the flag packages land there. sims passes the same flag when it lists or installs system images, so with the SDK on another disk (`ANDROID_HOME=/Volumes/data/Android/sdk`, and `ANDROID_AVD_HOME=/Volumes/data/Android/avd` for the AVDs) packages and AVDs land there too.
 
 | Platform | Needs | How sims finds it |
 |----------|-------|-------------------|
