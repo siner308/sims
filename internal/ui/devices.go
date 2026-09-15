@@ -65,7 +65,7 @@ func (v *devicesView) Hints() []hint {
 	return []hint{
 		{"b", "boot"}, {"ctrl+k", "shutdown"}, {"ctrl+e", "erase"}, {"ctrl+d", "delete"},
 		{"enter", "apps (boots first)"}, {"l", "logs"}, {"n", "new device"}, {"/", "filter"},
-		{"w", "wifi (android usb)"}, {"x", "disconnect wifi"}, {"p", "pair (ios)"},
+		{"w", "wifi: android enable / ios connect"}, {"x", "disconnect wifi"}, {"p", "pair (ios)"},
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 		{"shift+n", "sort name"}, {"shift+s", "sort state"}, {"shift+l", "sort last"}, {"shift+r", "sort runtime"},
@@ -256,6 +256,10 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case 'n':
 		v.app.push(newImagesView(v.app))
 	case 'w':
+		if d, ok := v.selected(); ok && d.Platform == device.PlatformIOS {
+			v.connect(d)
+			return nil
+		}
 		v.wireless(func(w device.Wireless, d device.Device) (string, error) { return w.EnableWireless(v.app.ctx, d) })
 	case 'x':
 		v.wireless(func(w device.Wireless, d device.Device) (string, error) {
@@ -289,7 +293,11 @@ func (v *devicesView) openApps() {
 		return
 	}
 	if d.Kind != device.KindVirtual {
-		v.app.flashErr(fmt.Errorf("%s is %s; connect it first", d.Name, strings.ToLower(string(d.State))))
+		hint := "plug it in or connect it first"
+		if d.Platform == device.PlatformIOS && d.State == device.StateOffline {
+			hint = "press w to open the wifi tunnel"
+		}
+		v.app.flashErr(fmt.Errorf("%s is %s; %s", d.Name, strings.ToLower(string(d.State)), hint))
 		return
 	}
 	p, err := v.app.providerFor(d)
@@ -336,6 +344,24 @@ func waitBooted(ctx context.Context, p device.Provider, d device.Device, timeout
 		}
 	}
 	return device.Device{}, fmt.Errorf("%s did not finish booting within %s", d.Name, timeout)
+}
+
+func (v *devicesView) connect(d device.Device) {
+	p, err := v.app.providerFor(d)
+	if err != nil {
+		v.app.flashErr(err)
+		return
+	}
+	c, ok := p.(device.Connector)
+	if !ok {
+		v.app.flashErr(fmt.Errorf("%s has no connect action", d.Platform))
+		return
+	}
+	v.app.status.SetText(" connecting to " + d.Name + " (same wifi, unlocked, developer mode on)...")
+	v.app.async(func() error { return c.Connect(v.app.ctx, d) }, func() {
+		v.app.flash("connected " + d.Name)
+		v.Refresh()
+	})
 }
 
 func (v *devicesView) wireless(fn func(device.Wireless, device.Device) (string, error)) {

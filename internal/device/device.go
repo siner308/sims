@@ -133,6 +133,11 @@ type Describer interface {
 	Info(ctx context.Context) [][2]string
 }
 
+// Connector is implemented by providers whose paired physical devices need a session opened before use.
+type Connector interface {
+	Connect(ctx context.Context, d Device) error
+}
+
 // Pairer is implemented by providers that can pair a physical device with this host.
 type Pairer interface {
 	PairDevice(ctx context.Context, d Device) error

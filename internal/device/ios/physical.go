@@ -165,6 +165,18 @@ func (p *Provider) PairDevice(ctx context.Context, d device.Device) error {
 	return devicectl(ctx, "manage", "pair", "--device", d.ID, "--timeout", "120")
 }
 
+// CoreDevice opens the wifi tunnel lazily: any command addressed to the device brings it from
+// "disconnected" to "connected", and a cheap read is enough to trigger that.
+func (p *Provider) Connect(ctx context.Context, d device.Device) error {
+	if d.Kind != device.KindPhysical {
+		return errors.New("only physical devices connect this way")
+	}
+	if d.State == device.StateUnpaired {
+		return errors.New("pair the device first (p)")
+	}
+	return devicectl(ctx, "device", "info", "details", "--device", d.ID, "--timeout", "60", "--quiet")
+}
+
 func devicectl(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "xcrun", append([]string{"devicectl"}, args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {

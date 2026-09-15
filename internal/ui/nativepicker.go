@@ -8,16 +8,24 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync/atomic"
 )
 
 var (
 	errNativePickerUnsupported = errors.New("no native file dialog on " + runtime.GOOS)
 	errNativePickerCancelled   = errors.New("cancelled")
-	dialogOS                   = runtime.GOOS
+	dialogOS                   atomic.Pointer[string]
 )
 
+func currentDialogOS() string {
+	if v := dialogOS.Load(); v != nil {
+		return *v
+	}
+	return runtime.GOOS
+}
+
 func nativePick(ctx context.Context, exts []string) (string, error) {
-	switch dialogOS {
+	switch currentDialogOS() {
 	case "darwin":
 		return pickDarwin(ctx, exts)
 	case "windows":

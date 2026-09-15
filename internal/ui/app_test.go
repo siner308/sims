@@ -595,10 +595,42 @@ func TestDevicesView_EnterOnOfflinePhoneFlashesError(t *testing.T) {
 		status = a.status.GetText(true)
 		_, isApps = a.top().(*appsView)
 	})
-	if !strings.Contains(status, "offline") {
-		t.Errorf("status = %q, want an offline hint", status)
+	if !strings.Contains(status, "offline") || !strings.Contains(status, "plug it in") {
+		t.Errorf("status = %q, want an offline hint for an android phone", status)
 	}
 	if isApps {
 		t.Error("apps must not open for an offline phone")
 	}
+}
+
+type connectProvider struct {
+	fakeProvider
+	connected atomic.Int32
+}
+
+func (c *connectProvider) Connect(context.Context, device.Device) error {
+	c.connected.Add(1)
+	return nil
+}
+
+func TestDevicesView_WOnIOSPhoneConnects(t *testing.T) {
+	cp := &connectProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
+		{ID: "BBBB", Name: "my iphone", Platform: device.PlatformIOS, Kind: device.KindPhysical, Transport: device.TransportWiFi, State: device.StateOffline},
+	}}}
+	a := New("test", cp)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 })
+
+	var status string
+	onUI(a, func() {
+		dv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+		status = a.status.GetText(true)
+	})
+	if !strings.Contains(status, "press w") {
+		t.Errorf("enter on an offline iphone should point at w, got %q", status)
+	}
+	onUI(a, func() { dv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone)) })
+	waitFor(t, a, 2*time.Second, func() bool { return cp.connected.Load() == 1 })
 }

@@ -135,9 +135,9 @@ func TestInstallableExts(t *testing.T) {
 }
 
 func TestPickAndInstall_FallsBackToTUIPicker(t *testing.T) {
-	prev := dialogOS
-	dialogOS = "linux"
-	t.Cleanup(func() { dialogOS = prev })
+	linux := "linux"
+	prev := dialogOS.Swap(&linux)
+	t.Cleanup(func() { dialogOS.Store(prev) })
 
 	fp := &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateBooted, Serial: "emulator-5554"},

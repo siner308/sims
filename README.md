@@ -64,7 +64,7 @@ Either platform is enough; the header shows what was found.
 | devices | `ctrl+k` `ctrl+e` `ctrl+d` | shutdown, erase (wipe data), delete |
 | devices | `a` or `enter` / `l` | apps / log stream of the selected device. On a stopped virtual device `enter` asks to boot it first and opens apps once it is up |
 | devices | `n` | new device (opens images) |
-| devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device |
+| devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
 | devices | `shift+P` `V` `N` `M` `R` `S` `L` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
@@ -87,7 +87,9 @@ avdmanager writes `hw.keyboard = no` (the emulator default). With that setting t
 
 ## Physical ios
 
-Devices show up from `devicectl list devices` once they have been paired. Select an `Unpaired` one and press `p` to run `devicectl manage pair`; the phone shows a trust prompt. Wifi reachability itself is managed by iOS and Xcode, so sims only reads it.
+Devices show up from `devicectl list devices` once they have been paired. Select an `Unpaired` one and press `p` to run `devicectl manage pair`; the phone shows a trust prompt.
+
+A paired phone on the same wifi shows as `Offline` until a CoreDevice tunnel is open, and the tunnel is opened lazily by the first command that addresses the device. Select it and press `w`: sims runs `devicectl device info details --device <id>`, which brings the state to `Connected` in a few seconds. No Xcode project needed. Requirements on the phone: unlocked, Developer Mode on, same network as the Mac (or plugged in over USB).
 
 ## What it runs underneath
 
@@ -101,7 +103,7 @@ Devices show up from `devicectl list devices` once they have been paired. Select
 | apps | `adb shell pm list packages -f -i` (+ `-3` to tell yours from preinstalled; `installer=` tells adb from store). Apps you installed get their display name and version from `aapt2 dump badging` on the pulled APK, cached under the user cache dir; preinstalled apps keep the package name | sim: `simctl listapps` (via `plutil`, `ApplicationType`), device: `devicectl device info apps` (+ `--include-all-apps`) |
 | install / uninstall / launch | `adb install -r`, `adb uninstall`, `cmd package resolve-activity` + `am start -n` | sim: `simctl install/uninstall/launch`, device: `devicectl device install app / uninstall app / process launch` |
 | logs | `adb logcat -v time` | sim: `simctl spawn UDID log stream`, device: `idevicesyslog -u UDID` |
-| wifi / pair | `adb tcpip 5555`, `adb connect`, `adb pair`, `adb disconnect` | `devicectl manage pair` |
+| wifi / pair | `adb tcpip 5555`, `adb connect`, `adb pair`, `adb disconnect` | `devicectl manage pair`, `devicectl device info details` (opens the tunnel) |
 | images | `sdkmanager --list` | `simctl list runtimes --json` |
 | create | `avdmanager create avd -n -k -d`, then `hw.keyboard = yes` in `config.ini` | `simctl create NAME TYPE RUNTIME` |
 
