@@ -369,7 +369,7 @@ func TestCreateView_ArrowNavigation(t *testing.T) {
 	}
 	press(tcell.KeyDown)
 	if _, button := focused(); button != 0 {
-		t.Errorf("down: button = %d, want 0 (create)", button)
+		t.Errorf("down past device type: button = %d, want 0 (create)", button)
 	}
 	press(tcell.KeyRight)
 	if _, button := focused(); button != 1 {
@@ -908,6 +908,9 @@ func TestDeviceTypeFilterAndResolve(t *testing.T) {
 		{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", Name: "iPhone 17 Pro", Screen: "1206x2622 @3x"},
 	}
 	labels := deviceTypeLabels(types)
+	if got := filterLabels(labels, labels[1]); len(got) != len(labels) {
+		t.Errorf("an exact label should keep the whole list: %v", got)
+	}
 	if got := filterLabels(labels, "9 pro"); len(got) != 2 {
 		t.Errorf("filter '9 pro' = %v", got)
 	}
@@ -1131,4 +1134,196 @@ func TestLogsView_RunnerUntilFirstLine(t *testing.T) {
 	}
 	waitFor(t, a, 5*time.Second, func() bool { return a.busy == 0 && strings.Contains(lv.text.GetText(true), "hello") })
 	onUI(a, func() { lv.stop() })
+}
+
+func TestCreateView_FiltersIncompatibleTypesAndNames(t *testing.T) {
+	a := New("t", &fakeProvider{platform: device.PlatformIOS})
+	_, stop := runHeadless(t, a)
+	defer stop()
+	types := []device.DeviceType{
+		{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-6s-Plus", Name: "iPhone 6s Plus", MinRuntime: "9.0", MaxRuntime: "15.255.255", Family: "iPhone"},
+		{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-15", Name: "iPhone 15", MinRuntime: "17.0", MaxRuntime: "26.255.255", Family: "iPhone"},
+		{ID: "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-4K", Name: "Apple TV 4K", MinRuntime: "9.0", MaxRuntime: "65535.255.255", Family: "Apple TV"},
+	}
+	var name, typ string
+	var all []string
+	onUI(a, func() {
+		cv := newCreateView(a, a.providers[device.PlatformIOS], device.Image{Name: "iOS 17.5", Version: "17.5", Platform: "iOS"}, types)
+		name = cv.form.GetFormItem(0).(*tview.InputField).GetText()
+		typ = cv.form.GetFormItem(1).(*tview.InputField).GetText()
+		all = cv.labels
+	})
+	if name != "iOS_17.5" {
+		t.Errorf("default name = %q, want iOS_17.5 (version not doubled)", name)
+	}
+	if !strings.Contains(typ, "iPhone 15") || strings.Contains(typ, "6s") {
+		t.Errorf("default type should be a compatible one: %q", typ)
+	}
+	if len(all) != 1 || strings.Contains(strings.Join(all, ""), "Apple TV") {
+		t.Errorf("an iOS runtime should list phones and pads only: %v", all)
+	}
+}
+
+func TestCreateView_ListOpensOnEnter(t *testing.T) {
+	a := New("t", &fakeProvider{platform: device.PlatformIOS})
+	_, stop := runHeadless(t, a)
+	defer stop()
+	types := []device.DeviceType{{ID: "x.a", Name: "iPhone A", Family: "iPhone"}, {ID: "x.b", Name: "iPhone B", Family: "iPhone"}}
+	var cv *createView
+	onUI(a, func() {
+		cv = newCreateView(a, a.providers[device.PlatformIOS], device.Image{Name: "iOS 26.5", Version: "26.5", Platform: "iOS"}, types)
+		a.push(cv)
+		cv.form.SetFocus(1)
+		a.tv.SetFocus(cv.form)
+	})
+	// the form's input capture runs first, then whatever it lets through reaches the field
+	press := func(k tcell.Key) {
+		onUI(a, func() {
+			if ev := cv.onKey(tcell.NewEventKey(k, 0, tcell.ModNone)); ev != nil {
+				cv.form.InputHandler()(ev, func(tview.Primitive) {})
+			}
+		})
+	}
+	state := func() (open bool, item, button int, text string) {
+		onUI(a, func() {
+			open = cv.listOpen
+			item, button = cv.form.GetFocusedItemIndex()
+			text = cv.completion.GetText()
+		})
+		return
+	}
+	if open, _, _, _ := state(); open {
+		t.Fatal("the list must stay closed until enter")
+	}
+	press(tcell.KeyEnter)
+	if open, item, _, _ := state(); !open || item != 1 {
+		t.Fatalf("enter should open the list on the device type field, open=%v item=%d", open, item)
+	}
+	press(tcell.KeyDown)
+	if open, item, _, text := state(); !open || item != 1 || !strings.HasPrefix(text, "iPhone A") {
+		t.Errorf("down inside the open list moves the highlight only: open=%v item=%d text=%q", open, item, text)
+	}
+	press(tcell.KeyEnter)
+	if open, _, _, text := state(); open || !strings.HasPrefix(text, "iPhone B") {
+		t.Errorf("enter should pick the highlighted entry and close: open=%v text=%q", open, text)
+	}
+	onUI(a, func() {
+		if ev := cv.onKey(tcell.NewEventKey(tcell.KeyRune, 'A', tcell.ModNone)); ev != nil {
+			cv.form.InputHandler()(ev, func(tview.Primitive) {})
+		}
+	})
+	if open, _, _, text := state(); !open || text != "A" {
+		t.Errorf("typing on a picked value should start a fresh search: open=%v text=%q", open, text)
+	}
+	press(tcell.KeyEscape)
+	if open, item, _, _ := state(); open || item != 1 {
+		t.Errorf("esc should close the list and stay on the field: open=%v item=%d", open, item)
+	}
+	press(tcell.KeyDown)
+	if _, _, button, _ := state(); button != 0 {
+		t.Errorf("with the list closed, down should reach the create button, got button=%d", button)
+	}
+}
+
+func TestCreateView_ListHighlightVisible(t *testing.T) {
+	a := New("t", &fakeProvider{platform: device.PlatformIOS})
+	screen, stop := runHeadless(t, a)
+	defer stop()
+	var types []device.DeviceType
+	for i := 0; i < 5; i++ {
+		types = append(types, device.DeviceType{ID: fmt.Sprintf("com.apple.CoreSimulator.SimDeviceType.iPhone-%d", i), Name: fmt.Sprintf("iPhone %d", i), Screen: "1000x2000 @3x", Family: "iPhone"})
+	}
+	onUI(a, func() {
+		cv := newCreateView(a, a.providers[device.PlatformIOS], device.Image{Name: "iOS 26.5", Version: "26.5", Platform: "iOS"}, types)
+		a.push(cv)
+		cv.form.SetFocus(1)
+		a.tv.SetFocus(cv.form)
+		cv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	})
+	a.tv.QueueUpdateDraw(func() {})
+	_, wantBG, _ := focusStyle.Decompose()
+	waitFor(t, a, 3*time.Second, func() bool {
+		w, h := screen.Size()
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				_, _, st, _ := screen.GetContent(x, y)
+				if _, bg, _ := st.Decompose(); bg == wantBG {
+					return true
+				}
+			}
+		}
+		return false
+	})
+}
+
+type createProvider struct {
+	fakeProvider
+	mu      sync.Mutex
+	created []string
+	booted  []string
+}
+
+func (p *createProvider) Create(_ context.Context, name string, _ device.Image, _ string, _ *device.Hardware) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.created = append(p.created, name)
+	p.devices = append(p.devices, device.Device{ID: "new-" + name, Name: name, Platform: p.platform, Kind: device.KindVirtual, State: device.StateShutdown})
+	return nil
+}
+
+func (p *createProvider) List(context.Context) ([]device.Device, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]device.Device(nil), p.devices...), nil
+}
+
+func (p *createProvider) Boot(_ context.Context, d device.Device) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.booted = append(p.booted, d.ID)
+	for i := range p.devices {
+		if p.devices[i].ID == d.ID {
+			p.devices[i].State = device.StateBooted
+		}
+	}
+	return nil
+}
+
+func TestCreateView_CreateBootsAndSelectsTheNewDevice(t *testing.T) {
+	p := &createProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
+		{ID: "old", Name: "old", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateBooted, LastActiveAt: time.Now()},
+	}}}
+	a := New("t", p)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return len(dv.devices) == 1 })
+	types := []device.DeviceType{{ID: "x.a", Name: "iPhone A", Family: "iPhone"}}
+	onUI(a, func() {
+		a.push(newImagesView(a))
+		cv := newCreateView(a, a.providers[device.PlatformIOS], device.Image{ID: "rt", Name: "iOS 26.5", Version: "26.5", Platform: "iOS"}, types)
+		a.push(cv)
+		cv.form.SetFocus(cv.form.GetFormItemCount()) // create button
+		cv.form.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	})
+	waitFor(t, a, 5*time.Second, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.booted) == 1 && len(a.stack) == 1 && a.busy == 0
+	})
+	p.mu.Lock()
+	booted := append([]string(nil), p.booted...)
+	p.mu.Unlock()
+	if booted[0] != "new-iOS_26.5" {
+		t.Errorf("the new device should boot right after creation, booted %v", booted)
+	}
+	waitFor(t, a, 5*time.Second, func() bool {
+		d, ok := dv.selected()
+		return ok && d.ID == "new-iOS_26.5"
+	})
+	var status string
+	onUI(a, func() { status = a.status.GetText(true) })
+	if !strings.Contains(status, "created iOS_26.5") {
+		t.Errorf("the created flash should survive the device list refresh, status = %q", status)
+	}
 }

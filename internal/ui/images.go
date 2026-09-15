@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -179,20 +180,35 @@ func (v *imagesView) createFrom(row imageRow) {
 }
 
 type createView struct {
-	app  *App
-	form *tview.Form
+	app        *App
+	form       *tview.Form
+	completion *tview.InputField
+	labels     []string // one per compatible type, what the completion list shows
+	// listOpen: the drop-down is out, so up/down/enter belong to it; closed, the arrows walk the form
+	listOpen bool
 }
 
 // Android AVDs take RAM, cores and disk; simulators have no such knobs, so the form only shows them
 // when the provider can write them back.
 func newCreateView(a *App, p device.Provider, img device.Image, types []device.DeviceType) *createView {
+	compatible := make([]device.DeviceType, 0, len(types))
+	for _, t := range types {
+		if t.Supports(img) {
+			compatible = append(compatible, t)
+		}
+	}
+	types = compatible
 	v := &createView{app: a, form: tview.NewForm()}
 	v.form.SetBorder(true).SetTitle(fmt.Sprintf(" new %s device from %s ", p.Platform(), img.Name)).SetTitleColor(titleColor())
 	v.form.SetFieldStyle(fieldStyle).SetLabelColor(tcell.ColorYellow)
 	v.form.SetButtonStyle(buttonStyle).SetButtonActivatedStyle(focusStyle)
 	v.form.SetInputCapture(v.onKey)
 
-	defaultName := strings.ReplaceAll(fmt.Sprintf("%s %s", img.Name, img.Version), " ", "_")
+	defaultName := img.Name
+	if !strings.Contains(img.Name, img.Version) {
+		defaultName += " " + img.Version
+	}
+	defaultName = strings.ReplaceAll(defaultName, " ", "_")
 	labels := deviceTypeLabels(types)
 	defaultType := ""
 	for i, t := range types {
@@ -200,13 +216,42 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 			defaultType = labels[i]
 		}
 	}
+	if defaultType == "" {
+		// simctl lists phones newest first, then pads, TVs and watches; land on the newest phone
+		for _, l := range labels {
+			if strings.Contains(strings.ToLower(l), "iphone") {
+				defaultType = l
+				break
+			}
+		}
+	}
+	if defaultType == "" && len(labels) > 0 {
+		defaultType = labels[0]
+	}
 	v.form.AddInputField("name", defaultName, 40, nil, nil)
 	// the device type is a text field with a filtering completion list: typing "pixel 9" narrows the
 	// options to those containing both words, and enter takes the highlighted one
 	v.form.AddInputField("device type", defaultType, 60, nil, nil)
 	typeField := v.form.GetFormItem(1).(*tview.InputField)
-	typeField.SetAutocompleteFunc(func(current string) []string { return filterLabels(labels, current) })
+	// styles must be set first: tview builds the drop-down inside SetAutocompleteFunc (the default
+	// text already matches a label) and only reads the styles at that moment
 	typeField.SetAutocompleteStyles(tcell.ColorDefault, fieldStyle, focusStyle)
+	typeField.SetAutocompleteFunc(func(current string) []string {
+		if !v.listOpen {
+			return nil
+		}
+		return filterLabels(labels, current)
+	})
+	typeField.SetAutocompletedFunc(func(text string, _ int, source int) bool {
+		if source == tview.AutocompletedNavigate {
+			return false // only the highlight moves; the text changes when an entry is picked
+		}
+		typeField.SetText(text)
+		v.listOpen = false
+		return true
+	})
+	v.completion = typeField
+	v.labels = labels
 
 	_, editable := p.(device.HardwareEditor)
 	if editable {
@@ -231,11 +276,25 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 			}
 			hw = &h
 		}
-		a.setStatus(" creating " + name + "...")
-		a.async(func() error { return p.Create(a.ctx, name, img, deviceType, hw) }, func() {
-			a.flash("created " + name)
+		a.setStatus(" creating and booting " + name + "...")
+		var created device.Device
+		a.async(func() error {
+			if err := p.Create(a.ctx, name, img, deviceType, hw); err != nil {
+				return err
+			}
+			d, err := findCreated(a.ctx, p, name)
+			if err != nil {
+				return err
+			}
+			created = d
+			return p.Boot(a.ctx, d)
+		}, func() {
 			a.pop()
 			a.pop()
+			if dv, ok := a.top().(*devicesView); ok {
+				dv.focusID = created.ID
+			}
+			a.flash("created " + name + ", booting")
 		})
 	})
 	v.form.AddButton("cancel", func() { a.pop() })
@@ -243,8 +302,38 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 	return v
 }
 
+// findCreated looks the new device up by name: Create returns no id, and a fresh simulator has no
+// boot history, so among namesakes the never-booted one is the new one.
+func findCreated(ctx context.Context, p device.Provider, name string) (device.Device, error) {
+	devices, err := p.List(ctx)
+	if err != nil {
+		return device.Device{}, err
+	}
+	var found *device.Device
+	for i := range devices {
+		d := devices[i]
+		if d.Name != name || d.Kind != device.KindVirtual {
+			continue
+		}
+		if found == nil || (d.LastActiveAt.IsZero() && !found.LastActiveAt.IsZero()) {
+			found = &d
+		}
+	}
+	if found == nil {
+		return device.Device{}, fmt.Errorf("%s was created but does not show up in the device list yet; refresh (r) and boot it with b", name)
+	}
+	return *found, nil
+}
+
 // filterLabels keeps the labels that contain every whitespace-separated word of the query, case-insensitively.
+// A query that already is one of the labels gets the whole list back, so the drop-down stays open
+// and up/down can move on to a neighbour instead of collapsing to the one entry.
 func filterLabels(labels []string, query string) []string {
+	for _, l := range labels {
+		if strings.TrimSpace(l) == strings.TrimSpace(query) && query != "" {
+			return labels
+		}
+	}
 	words := strings.Fields(strings.ToLower(query))
 	var out []string
 	for _, l := range labels {
@@ -353,6 +442,30 @@ func readHardwareFields(form *tview.Form, first int) (device.Hardware, error) {
 // Arrow keys move between fields and buttons; tview's Form only walks with tab and enter.
 // An open dropdown keeps up/down for its own list.
 func (v *createView) onKey(ev *tcell.EventKey) *tcell.EventKey {
+	if item, _ := v.form.GetFocusedItemIndex(); item >= 0 && v.form.GetFormItem(item) == tview.FormItem(v.completion) {
+		switch key := ev.Key(); {
+		case v.listOpen && (key == tcell.KeyUp || key == tcell.KeyDown):
+			return ev
+		case v.listOpen && key == tcell.KeyEscape:
+			v.listOpen = false // tview drops the list itself; esc does not leave the form
+			return ev
+		case v.listOpen && (key == tcell.KeyEnter || key == tcell.KeyTab):
+			if len(filterLabels(v.labels, v.completion.GetText())) == 0 {
+				v.listOpen = false // nothing to pick, let the key walk the form instead
+				break
+			}
+			return ev
+		case !v.listOpen && key == tcell.KeyEnter:
+			v.listOpen = true
+			v.completion.Autocomplete()
+			return nil
+		case !v.listOpen && (key == tcell.KeyRune || key == tcell.KeyBackspace || key == tcell.KeyBackspace2):
+			// typing starts a fresh search: appending to the picked label would match nothing
+			v.completion.SetText("")
+			v.listOpen = true
+			return ev
+		}
+	}
 	return formArrowKeys(v.app, v.form, ev)
 }
 
@@ -393,7 +506,7 @@ func formArrowKeys(a *App, form *tview.Form, ev *tcell.EventKey) *tcell.EventKey
 func (v *createView) Name() string               { return "new" }
 func (v *createView) Primitive() tview.Primitive { return v.form }
 func (v *createView) Hints() []hint {
-	return []hint{{"up/down", "field"}, {"left/right", "button"}, {"enter", "open list / press"}, {"esc", "cancel"}}
+	return []hint{{"arrows", "move"}, {"enter", "open list / pick / press"}, {"type", "search device types"}, {"esc", "close list / cancel"}}
 }
 func (v *createView) Refresh() {}
 

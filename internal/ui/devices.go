@@ -52,6 +52,8 @@ type devicesView struct {
 	// A stock Xcode install lists dozens of simulators that have never been booted (82 here, 8 with a
 	// last boot); they stay out of the list until asked for.
 	showUnused bool
+	// focusID moves the cursor to that device on the next render (a device just created), then clears
+	focusID string
 }
 
 var defaultSort = sortSpec{col: colState}
@@ -197,8 +199,11 @@ func (v *devicesView) render() {
 		if v.filter != "" && !strings.Contains(hay, strings.ToLower(v.filter)) {
 			continue
 		}
-		if d.ID == selectedID {
+		if d.ID == selectedID || d.ID == v.focusID {
 			row = r
+		}
+		if d.ID == v.focusID {
+			v.focusID = ""
 		}
 		v.table.SetCell(r, 0, tview.NewTableCell(highlight(string(d.Platform), v.filter)).SetReference(d))
 		v.table.SetCell(r, 1, tview.NewTableCell(highlight(string(d.Transport), v.filter)))

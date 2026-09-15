@@ -33,6 +33,8 @@ type App struct {
 	busy       int // async jobs in flight; the runner shows while it is above zero
 	spinFrame  int
 	spinMsg    string
+	flashText  string // last flash, shown again whenever the status is cleared before flashUntil
+	flashUntil time.Time
 	spinStop   chan struct{}
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -280,6 +282,9 @@ func (a *App) selectedDevice() (device.Device, bool) {
 // setStatus writes the status line and gives it as many rows as the text needs at the current
 // width (capped), so a long error is wrapped instead of cut at the right edge.
 func (a *App) setStatus(text string) {
+	if text == "" && time.Now().Before(a.flashUntil) {
+		text = " " + tview.Escape(a.flashText)
+	}
 	a.status.SetText(text)
 	_, _, width, _ := a.status.GetInnerRect()
 	rows := 0
@@ -342,10 +347,14 @@ func (a *App) stopSpinner() {
 }
 
 func (a *App) flash(msg string) {
+	a.flashText, a.flashUntil = msg, time.Now().Add(4*time.Second)
 	a.setStatus(" " + tview.Escape(msg))
 	go func() {
 		time.Sleep(4 * time.Second)
 		a.tv.QueueUpdateDraw(func() {
+			if a.flashText == msg {
+				a.flashText, a.flashUntil = "", time.Time{}
+			}
 			if strings.TrimSpace(a.status.GetText(true)) == msg {
 				a.setStatus("")
 			}
@@ -430,13 +439,13 @@ func (a *App) prompt(label, initial string, onDone func(string)) {
 
 func (a *App) promptPath(label, initial string, onDone func(string)) {
 	in := newInput(label + " ").SetText(initial).SetFieldWidth(0)
+	in.SetAutocompleteStyles(tcell.ColorDefault, fieldStyle, focusStyle) // before the func: tview may build the list inside it
 	in.SetAutocompleteFunc(func(current string) []string {
 		if len(current) == 0 {
 			return nil
 		}
 		return completePath(current)
 	})
-	in.SetAutocompleteStyles(tcell.ColorDefault, fieldStyle, focusStyle)
 	in.SetDoneFunc(func(key tcell.Key) {
 		// tab with no completion list open would otherwise close the prompt
 		if key == tcell.KeyTab || key == tcell.KeyBacktab {
