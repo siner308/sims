@@ -57,3 +57,6 @@ case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) echo "add $INSTALL_DIR to your PATH, e.g. export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
+
+echo
+"$INSTALL_DIR/sims" doctor || true

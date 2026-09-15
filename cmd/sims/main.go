@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime/debug"
 
 	"github.com/siner308/sims/internal/device/android"
 	"github.com/siner308/sims/internal/device/ios"
+	"github.com/siner308/sims/internal/doctor"
 	"github.com/siner308/sims/internal/ui"
 )
 
@@ -25,9 +27,21 @@ func resolveVersion() string {
 
 func main() {
 	v := resolveVersion()
-	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
-		fmt.Println("sims", v)
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-v", "--version":
+			fmt.Println("sims", v)
+			return
+		case "doctor":
+			fmt.Println("sims", v)
+			if !doctor.Run(context.Background(), os.Stdout, android.New(), ios.New()) {
+				os.Exit(1)
+			}
+			return
+		case "-h", "--help", "help":
+			fmt.Println("usage: sims            start the TUI\n       sims doctor     check adb, emulator, avdmanager, sdkmanager, aapt2, xcrun simctl/devicectl, idevicesyslog\n       sims --version")
+			return
+		}
 	}
 	app := ui.New(v, android.New(), ios.New())
 	if err := app.Run(); err != nil {
