@@ -1040,3 +1040,27 @@ func TestDangerNote_PhysicalDelete(t *testing.T) {
 		t.Errorf("virtual note = %q", avd)
 	}
 }
+
+func TestStatus_LongErrorWraps(t *testing.T) {
+	a := New("t", &fakeProvider{platform: device.PlatformAndroid})
+	screen, stop := runHeadless(t, a)
+	defer stop()
+	onUI(a, func() { screen.SetSize(80, 30); a.tv.Sync() })
+	a.tv.QueueUpdateDraw(func() {})
+	long := strings.Repeat("adb -s emulator-5554 shell pm install failed: ", 4)
+	onUI(a, func() { a.flashErr(fmt.Errorf("%s", long)) })
+	a.tv.QueueUpdateDraw(func() {})
+	var rows, height int
+	onUI(a, func() {
+		rows = a.statusRows
+		_, _, _, height = a.status.GetRect()
+	})
+	if rows < 3 || height != rows {
+		t.Errorf("status rows=%d height=%d for a %d-char message on an 80-col screen", rows, height, len(long))
+	}
+	onUI(a, func() { a.setStatus("") })
+	onUI(a, func() { rows = a.statusRows })
+	if rows != 1 {
+		t.Errorf("clearing should shrink the status back to one row, got %d", rows)
+	}
+}

@@ -39,7 +39,7 @@ func (v *imagesView) Hints() []hint {
 }
 
 func (v *imagesView) Refresh() {
-	v.app.status.SetText(" loading images...")
+	v.app.setStatus(" loading images...")
 	var rows []imageRow
 	var errs []string
 	v.app.async(func() error {
@@ -73,7 +73,7 @@ func (v *imagesView) Refresh() {
 		if len(errs) > 0 {
 			v.app.flashErr(fmt.Errorf("%s", strings.Join(errs, "; ")))
 		} else {
-			v.app.status.SetText("")
+			v.app.setStatus("")
 		}
 	})
 }
@@ -144,7 +144,7 @@ func (v *imagesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 		p := v.app.providers[row.platform]
 		v.app.confirm(fmt.Sprintf("install %s?", row.image.ID), func() {
-			v.app.status.SetText(" installing " + row.image.ID + " (this can take minutes)...")
+			v.app.setStatus(" installing " + row.image.ID + " (this can take minutes)...")
 			v.app.async(func() error { return p.InstallImage(v.app.ctx, row.image) }, func() {
 				v.app.flash("installed " + row.image.ID)
 				v.Refresh()
@@ -231,7 +231,7 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 			}
 			hw = &h
 		}
-		a.status.SetText(" creating " + name + "...")
+		a.setStatus(" creating " + name + "...")
 		a.async(func() error { return p.Create(a.ctx, name, img, deviceType, hw) }, func() {
 			a.flash("created " + name)
 			a.pop()

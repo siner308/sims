@@ -20,18 +20,19 @@ type view interface {
 }
 
 type App struct {
-	tv        *tview.Application
-	root      *tview.Flex
-	header    *header
-	status    *tview.TextView
-	cmd       *tview.InputField
-	body      *tview.Pages
-	providers map[device.Platform]device.Provider
-	missing   map[device.Platform]error
-	stack     []view
-	ctx       context.Context
-	cancel    context.CancelFunc
-	version   string
+	tv         *tview.Application
+	root       *tview.Flex
+	header     *header
+	status     *tview.TextView
+	cmd        *tview.InputField
+	body       *tview.Pages
+	providers  map[device.Platform]device.Provider
+	missing    map[device.Platform]error
+	stack      []view
+	statusRows int
+	ctx        context.Context
+	cancel     context.CancelFunc
+	version    string
 }
 
 func New(version string, providers ...device.Provider) *App {
@@ -78,6 +79,7 @@ func (a *App) build() {
 		AddItem(a.header.flex, minHeaderHeight, 0, false).
 		AddItem(a.body, 0, 1, true).
 		AddItem(a.status, 1, 0, false)
+	a.statusRows = 1
 	a.cmd.SetBorder(true).SetBorderColor(tcell.ColorAqua)
 
 	a.tv.SetRoot(a.root, true).EnableMouse(false)
@@ -181,7 +183,7 @@ func (a *App) openCommand() {
 	a.root.AddItem(a.header.flex, a.header.height, 0, false).
 		AddItem(a.cmd, 3, 0, true).
 		AddItem(a.body, 0, 1, false).
-		AddItem(a.status, 1, 0, false)
+		AddItem(a.status, max(1, a.statusRows), 0, false)
 	a.tv.SetFocus(a.cmd)
 }
 
@@ -189,7 +191,7 @@ func (a *App) closeCommand() {
 	a.root.Clear()
 	a.root.AddItem(a.header.flex, a.header.height, 0, false).
 		AddItem(a.body, 0, 1, true).
-		AddItem(a.status, 1, 0, false)
+		AddItem(a.status, max(1, a.statusRows), 0, false)
 	a.tv.SetFocus(a.top().Primitive())
 }
 
@@ -248,7 +250,7 @@ func (a *App) wirelessCommand(fields []string) {
 	if len(fields) > 2 {
 		code = fields[2]
 	}
-	a.status.SetText(fmt.Sprintf(" %s %s...", verb, addr))
+	a.setStatus(fmt.Sprintf(" %s %s...", verb, addr))
 	a.async(func() error {
 		ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 		defer cancel()
@@ -271,20 +273,34 @@ func (a *App) selectedDevice() (device.Device, bool) {
 	return device.Device{}, false
 }
 
+// setStatus writes the status line and gives it as many rows as the text needs at the current
+// width (capped), so a long error is wrapped instead of cut at the right edge.
+func (a *App) setStatus(text string) {
+	a.status.SetText(text)
+	_, _, width, _ := a.status.GetInnerRect()
+	rows := 1
+	if width > 0 {
+		plain := a.status.GetText(true)
+		rows = min(6, max(1, (len([]rune(plain))+width-1)/width))
+	}
+	a.statusRows = rows
+	a.root.ResizeItem(a.status, rows, 0)
+}
+
 func (a *App) flash(msg string) {
-	a.status.SetText(" " + tview.Escape(msg))
+	a.setStatus(" " + tview.Escape(msg))
 	go func() {
 		time.Sleep(4 * time.Second)
 		a.tv.QueueUpdateDraw(func() {
 			if strings.TrimSpace(a.status.GetText(true)) == msg {
-				a.status.SetText("")
+				a.setStatus("")
 			}
 		})
 	}()
 }
 
 func (a *App) flashErr(err error) {
-	a.status.SetText(" [red]" + tview.Escape(err.Error()) + "[-]")
+	a.setStatus(" [red]" + tview.Escape(err.Error()) + "[-]")
 }
 
 // work must not touch tview; only then runs on the UI goroutine.
@@ -340,7 +356,7 @@ func (a *App) prompt(label, initial string, onDone func(string)) {
 	in.SetDoneFunc(func(key tcell.Key) {
 		text := in.GetText()
 		a.root.RemoveItem(in)
-		a.root.AddItem(a.status, 1, 0, false)
+		a.root.AddItem(a.status, max(1, a.statusRows), 0, false)
 		a.tv.SetFocus(a.top().Primitive())
 		if key == tcell.KeyEnter {
 			onDone(text)
@@ -367,7 +383,7 @@ func (a *App) promptPath(label, initial string, onDone func(string)) {
 		}
 		text := in.GetText()
 		a.root.RemoveItem(in)
-		a.root.AddItem(a.status, 1, 0, false)
+		a.root.AddItem(a.status, max(1, a.statusRows), 0, false)
 		a.tv.SetFocus(a.top().Primitive())
 		if key == tcell.KeyEnter && text != "" {
 			onDone(text)

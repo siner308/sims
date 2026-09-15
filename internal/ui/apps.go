@@ -45,7 +45,7 @@ func (v *appsView) Refresh() {
 		v.app.flashErr(err)
 		return
 	}
-	v.app.status.SetText(" loading apps...")
+	v.app.setStatus(" loading apps...")
 	var apps []device.App
 	v.app.async(func() error {
 		var err error
@@ -54,7 +54,7 @@ func (v *appsView) Refresh() {
 	}, func() {
 		v.apps = apps
 		v.render()
-		v.app.status.SetText("")
+		v.app.setStatus("")
 	})
 }
 
@@ -160,7 +160,7 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 // The OS dialog runs off the UI goroutine; a platform without one falls back to the TUI picker.
 func (v *appsView) pickAndInstall(p device.Provider, native bool) {
 	install := func(path string) {
-		v.app.status.SetText(" installing " + path + "...")
+		v.app.setStatus(" installing " + path + "...")
 		v.app.async(func() error { return p.InstallApp(v.app.ctx, v.dev, path) }, func() {
 			v.app.flash("installed " + path)
 			v.Refresh()
@@ -171,7 +171,7 @@ func (v *appsView) pickAndInstall(p device.Provider, native bool) {
 		v.app.push(newPickerView(v.app, exts, install))
 		return
 	}
-	v.app.status.SetText(" waiting for the file dialog...")
+	v.app.setStatus(" waiting for the file dialog...")
 	var path string
 	go func() {
 		var err error
@@ -181,7 +181,7 @@ func (v *appsView) pickAndInstall(p device.Provider, native bool) {
 			case errors.Is(err, errNativePickerUnsupported):
 				v.app.push(newPickerView(v.app, exts, install))
 			case errors.Is(err, errNativePickerCancelled):
-				v.app.status.SetText("")
+				v.app.setStatus("")
 			case err != nil:
 				v.app.flashErr(err)
 			default:

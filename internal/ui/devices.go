@@ -81,7 +81,7 @@ func (v *devicesView) Hints() []hint {
 }
 
 func (v *devicesView) Refresh() {
-	v.app.status.SetText(" loading devices...")
+	v.app.setStatus(" loading devices...")
 	var all []device.Device
 	var errs []string
 	v.app.async(func() error {
@@ -100,7 +100,7 @@ func (v *devicesView) Refresh() {
 		if len(errs) > 0 {
 			v.app.flashErr(fmt.Errorf("%s", strings.Join(errs, "; ")))
 		} else {
-			v.app.status.SetText("")
+			v.app.setStatus("")
 		}
 		v.pollTransitions()
 	})
@@ -355,7 +355,7 @@ func (v *devicesView) openApps() {
 		return
 	}
 	v.app.confirm(fmt.Sprintf("%s is not running. Boot it and open apps?", d.Name), func() {
-		v.app.status.SetText(" booting " + d.Name + "...")
+		v.app.setStatus(" booting " + d.Name + "...")
 		var booted device.Device
 		v.app.async(func() error {
 			if err := p.Boot(v.app.ctx, d); err != nil {
@@ -365,7 +365,7 @@ func (v *devicesView) openApps() {
 			booted, err = waitBooted(v.app.ctx, p, d, bootTimeout)
 			return err
 		}, func() {
-			v.app.status.SetText("")
+			v.app.setStatus("")
 			v.Refresh()
 			v.app.push(newAppsView(v.app, booted))
 		})
@@ -406,7 +406,7 @@ func (v *devicesView) connect(d device.Device) {
 		v.app.flashErr(fmt.Errorf("%s has no connect action", d.Platform))
 		return
 	}
-	v.app.status.SetText(" connecting to " + d.Name + " (same wifi, unlocked, developer mode on)...")
+	v.app.setStatus(" connecting to " + d.Name + " (same wifi, unlocked, developer mode on)...")
 	v.app.async(func() error { return c.Connect(v.app.ctx, d) }, func() {
 		v.app.flash("connected " + d.Name)
 		v.Refresh()
@@ -428,7 +428,7 @@ func (v *devicesView) wireless(fn func(device.Wireless, device.Device) (string, 
 		v.app.flashErr(fmt.Errorf("%s has no wireless debugging support", d.Platform))
 		return
 	}
-	v.app.status.SetText(" " + d.Name + ": working...")
+	v.app.setStatus(" " + d.Name + ": working...")
 	var result string
 	v.app.async(func() error {
 		var err error
@@ -481,7 +481,7 @@ func (v *devicesView) pair() {
 		return
 	}
 	v.app.confirm(fmt.Sprintf("pair %s?\n\n%s", d.Name, pairingGuide), func() {
-		v.app.status.SetText(" pairing " + d.Name + ": accept the prompt on the phone (up to 2 minutes)...")
+		v.app.setStatus(" pairing " + d.Name + ": accept the prompt on the phone (up to 2 minutes)...")
 		v.app.async(func() error { return pairer.PairDevice(v.app.ctx, d) }, func() {
 			v.app.flash("paired " + d.Name + "; unplug it and use w to reach it over wifi")
 			v.Refresh()
@@ -506,7 +506,7 @@ func (v *devicesView) act(verb string, dangerous bool, fn func(device.Provider, 
 		return
 	}
 	run := func() {
-		v.app.status.SetText(fmt.Sprintf(" %s %s...", verb, d.Name))
+		v.app.setStatus(fmt.Sprintf(" %s %s...", verb, d.Name))
 		v.app.async(func() error { return fn(p, d) }, func() {
 			v.app.flash(fmt.Sprintf("%s %s: ok", verb, d.Name))
 			v.Refresh()
