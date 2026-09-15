@@ -3,12 +3,12 @@ package android
 import "testing"
 
 func TestParseBadging(t *testing.T) {
-	out := "package: name='com.devsisters.test.whatever' versionCode='23642' versionName='10.1.02' platformBuildVersionName='16'\n" +
-		"application-label:'Nightmare'\n" +
-		"application-label-af:'Nightmare'\n" +
-		"application-label-ko:'악몽'\n"
+	out := "package: name='com.example.sample' versionCode='42' versionName='1.2.3' platformBuildVersionName='16'\n" +
+		"application-label:'Sample App'\n" +
+		"application-label-af:'Sample App'\n" +
+		"application-label-ko:'샘플 앱'\n"
 	info := parseBadging(out)
-	if info.Label != "Nightmare" || info.Version != "10.1.02" {
+	if info.Label != "Sample App" || info.Version != "1.2.3" {
 		t.Errorf("got %+v", info)
 	}
 }
