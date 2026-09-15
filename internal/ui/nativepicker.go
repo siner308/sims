@@ -46,19 +46,20 @@ func pickDarwin(ctx context.Context, exts []string) (string, error) {
 	}
 	// The sheet is attached to the terminal app and that app is re-activated afterwards, whether the
 	// user picked or cancelled, so keyboard focus comes back to the TUI instead of staying with osascript.
+	// "result" is a reserved word in AppleScript, hence "chosen"
 	script := fmt.Sprintf(`set term to (path to frontmost application as text)
-set result to ""
+set chosen to ""
 try
 	tell application term
 		set f to choose file of type {%s} with prompt "sims: pick a build to install (%s)"
 	end tell
-	set result to POSIX path of f
+	set chosen to POSIX path of f
 on error msg number n
 	tell application term to activate
 	error msg number n
 end try
 tell application term to activate
-result`, strings.Join(types, ", "), strings.Join(exts, ", "))
+chosen`, strings.Join(types, ", "), strings.Join(exts, ", "))
 	out, err := runDialog(ctx, "osascript", "-e", script)
 	if err != nil {
 		if strings.Contains(err.Error(), "User canceled") || strings.Contains(err.Error(), "-128") {
