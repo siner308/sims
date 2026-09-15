@@ -250,7 +250,7 @@ func TestDevicesView_Sort(t *testing.T) {
 	if got := names(v); !slices.Equal(got, want) {
 		t.Errorf("default sort = %v, want %v", got, want)
 	}
-	if got := v.table.GetCell(0, int(colState)).Text; got != "[::b]STATE^" {
+	if got := v.table.GetCell(0, int(colState)).Text; got != "[::b]STATE\u2191" {
 		t.Errorf("state header = %q", got)
 	}
 	if got := v.table.GetCell(1, 6).Text; got != "1m ago" {
@@ -290,7 +290,7 @@ func TestDevicesView_Sort(t *testing.T) {
 	if !v.sort.desc || names(v)[0] != "booted-new" {
 		t.Errorf("shift+L should start desc (most recent first), got %v desc=%v", names(v), v.sort.desc)
 	}
-	if got := v.table.GetCell(0, int(colLast)).Text; got != "[::b]LASTv" {
+	if got := v.table.GetCell(0, int(colLast)).Text; got != "[::b]LAST\u2193" {
 		t.Errorf("last header = %q", got)
 	}
 }
