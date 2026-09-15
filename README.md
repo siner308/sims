@@ -28,11 +28,14 @@ Android Studio and Xcode both ship a device manager, and both take a while to op
 No toolchain needed; grab the binary for your machine.
 
 ```sh
-# macOS / Linux: latest release into /usr/local/bin (or ~/.local/bin when that is not writable)
+# macOS / Linux: the latest release into /usr/local/bin (or ~/.local/bin when that is not writable)
 curl -fsSL https://raw.githubusercontent.com/siner308/sims/main/install.sh | sh
+```
 
-# pin a version, or choose the directory
-SIMS_VERSION=v0.1.0 SIMS_INSTALL_DIR=$HOME/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/siner308/sims/main/install.sh)"
+The script asks GitHub for the latest release, so this line never needs updating. Two optional knobs: `SIMS_VERSION=<tag>` installs a specific release and `SIMS_INSTALL_DIR=<dir>` picks the directory.
+
+```sh
+SIMS_VERSION=<tag> SIMS_INSTALL_DIR="$HOME/bin" sh -c "$(curl -fsSL https://raw.githubusercontent.com/siner308/sims/main/install.sh)"
 ```
 
 Windows: download `sims_windows_amd64.zip` (or `arm64`) from the [releases page](https://github.com/siner308/sims/releases), unzip, and put `sims.exe` on your `PATH`.
