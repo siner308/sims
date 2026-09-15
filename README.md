@@ -49,7 +49,25 @@ go install github.com/siner308/sims/cmd/sims@latest
 
 ### What sims needs on the machine
 
-Either platform is enough; the header shows what was found.
+`sims doctor` checks every tool below and prints how to get the missing ones; `install.sh` runs it at the end. Either platform is enough; the header shows what was found.
+
+```
+$ sims doctor
+sims v0.1.0
+android
+  ok       Android SDK    /Users/me/Library/Android/sdk
+  ok       adb            /Users/me/Library/Android/sdk/platform-tools/adb (36.0.0)
+  ok       emulator       /Users/me/Library/Android/sdk/emulator/emulator
+  MISSING  avdmanager     install cmdline-tools into <sdk>/cmdline-tools/latest
+  MISSING  sdkmanager     install cmdline-tools into <sdk>/cmdline-tools/latest
+  skip     aapt2          optional: sdkmanager "build-tools;35.0.0" (app names fall back to package ids without it)
+ios
+  ok       xcrun          /usr/bin/xcrun
+  ok       Xcode          26.6
+  ok       simctl         xcrun simctl
+  ok       devicectl      xcrun devicectl
+  skip     idevicesyslog  optional: brew install libimobiledevice (needed for logs from physical iPhones)
+```
 
 | Platform | Needs | How sims finds it |
 |----------|-------|-------------------|
@@ -60,7 +78,7 @@ Either platform is enough; the header shows what was found.
 
 ### Devices
 
-Everything in one table: `VIA` says how a device is reached (`avd` and `sim` are virtual, `usb` and `wifi` are physical), `STATE` is colored, `LAST` is the last boot or last connection. Running devices sort first, then the most recently used. `shift+letter` sorts by a column; the same key again flips the direction.
+Everything in one table: `VIA` says how a device is reached (`avd` and `sim` are virtual, `usb` and `wifi` are physical), `STATE` is colored, `LAST` is the last boot or last connection. Simulators that have never been booted (a fresh Xcode lists dozens) stay hidden until you press `s`; the title shows how many. Running devices sort first, then the most recently used. `shift+letter` sorts by a column; the same key again flips the direction.
 
 `enter` opens the apps of the selected device. On a stopped virtual device it asks to boot it first and opens apps once it is up.
 
@@ -78,7 +96,7 @@ Apps you installed come first with their display name and version; preinstalled 
   <img src="docs/img/logs.svg" alt="logs view" width="100%">
 </p>
 
-Live `logcat` or `log stream` with a substring filter, pause, and clear. Works for simulators and for physical devices (`idevicesyslog` on iOS).
+Live `logcat` or `log stream` with a substring filter, pause, clear, and a wrap toggle for long lines. From the apps view, `l` narrows the stream to the selected app (`logcat --pid` on Android, `log stream --predicate` on iOS). Works for simulators and for physical devices (`idevicesyslog` on iOS).
 
 ### Images and new devices
 
@@ -86,7 +104,7 @@ Live `logcat` or `log stream` with a substring filter, pause, and clear. Works f
   <img src="docs/img/images.svg" alt="images view" width="100%">
 </p>
 
-Installed system images and iOS runtimes first, then everything `sdkmanager` can fetch. `enter` on an installed image opens a small form (name, device profile) and creates the AVD or simulator. Android images install from here with `i`; iOS runtimes come from `xcodebuild -downloadPlatform iOS`.
+Installed system images and iOS runtimes by default; `s` adds everything `sdkmanager` can still download. `enter` on an installed image opens a form and creates the AVD or simulator: name, device profile with its screen size where the SDK knows it (`pixel_7  1080x2400`, `iPhone 17 Pro  1206x2622 @3x`), and for Android also RAM, CPU cores and disk. Those three can be changed later from the devices view with `e`. Android images install from here with `i`; iOS runtimes come from `xcodebuild -downloadPlatform iOS`.
 
 ### Help
 
@@ -104,18 +122,21 @@ Installed system images and iOS runtimes first, then everything `sdkmanager` can
 | global | `?` / `esc` / `ctrl+c` | help / back / quit |
 | global | `r` | refresh |
 | devices | `b` | boot |
-| devices | `ctrl+k` `ctrl+e` `ctrl+d` | shutdown; wipe data (factory reset, the device stays); delete the device itself |
+| devices | `ctrl+k` `ctrl+e` `ctrl+d` | shutdown; wipe data (factory reset, the device stays); delete the device itself. On a physical device `ctrl+d` forgets it instead: iOS unpairs (`devicectl manage unpair`), Android drops the wifi connection (`adb disconnect`); a USB phone simply leaves when unplugged |
 | devices | `a` or `enter` / `l` | apps / log stream of the selected device. On a stopped virtual device `enter` asks to boot it first and opens apps once it is up |
-| devices | `n` | new device (opens images) |
+| devices | `n` / `e` / `s` / `/` | new device (opens images) / edit hardware of an AVD (RAM, cores, disk; applied at its next boot) / show never-booted simulators / filter |
 | devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
 | devices | `shift+P` `V` `N` `M` `R` `S` `L` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
 | apps | `enter` / `i` / `I` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |
+| apps | `l` | logs of the selected app only (android: `logcat --pid`, so the app must be running; ios: `log stream --predicate`) |
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
-| logs | `/` `c` `p` `g` `G` | filter, clear, pause, top, bottom |
-| images | `n` or `enter` / `i` | new device from image / install image (android) |
+| logs | `/` `c` `p` `w` `g` `G` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
+| images | `n` or `enter` / `i` / `s` | new device from image / install image (android) / show downloadable images |
+
+Filtering works the same everywhere: `/` opens an empty prompt, `enter` applies the text as a case-insensitive substring match and highlights every hit in the rows (or log lines) that pass, an empty `enter` clears the filter, and `esc` leaves the current filter alone.
 
 Anything that stops or removes something (shutdown, wipe, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; wipe, delete and uninstall also ask for confirmation, and the prompt spells out what is lost.
 
@@ -142,13 +163,15 @@ A paired phone on the same wifi shows as `Offline` until a CoreDevice tunnel is 
 | boot | `hw.keyboard = yes` in `config.ini`, then `emulator -avd NAME` (detached) | `simctl boot UDID` + `open -a Simulator` |
 | shutdown | `adb emu kill` | `simctl shutdown UDID` |
 | erase | `emulator -avd NAME -wipe-data` | `simctl erase UDID` |
-| delete | `avdmanager delete avd -n NAME` | `simctl delete UDID` |
+| delete | `avdmanager delete avd -n NAME`; wifi phone: `adb disconnect` | `simctl delete UDID`; phone: `devicectl manage unpair` |
 | apps | `adb shell pm list packages -f -i` (+ `-3` to tell yours from preinstalled; `installer=` tells adb from store). Apps you installed get their display name and version from `aapt2 dump badging` on the pulled APK, cached under the user cache dir; preinstalled apps keep the package name | sim: `simctl listapps` (via `plutil`), device: `devicectl device info apps` (+ `--include-all-apps`) |
 | install / uninstall / launch | `adb install -r`, `adb uninstall`, `cmd package resolve-activity` + `am start -n` | sim: `simctl install/uninstall/launch`, device: `devicectl device install app / uninstall app / process launch` |
-| logs | `adb logcat -v time` | sim: `simctl spawn UDID log stream`, device: `idevicesyslog -u UDID` |
+| logs | `adb logcat -v time` (+ `--pid=$(pidof pkg)` for one app) | sim: `simctl spawn UDID log stream` (+ `--predicate 'process == NAME'`), device: `idevicesyslog -u UDID` (+ `-p NAME`, per the libimobiledevice docs; untested here) |
 | wifi / pair | `adb tcpip 5555`, `adb connect`, `adb pair`, `adb disconnect` | `devicectl manage pair`, `devicectl device info details` (opens the tunnel) |
 | images | `sdkmanager --list` | `simctl list runtimes --json` |
-| create | `avdmanager create avd -n -k -d`, then `hw.keyboard = yes` in `config.ini` | `simctl create NAME TYPE RUNTIME` |
+| create | `avdmanager create avd -n -k -d`, then `hw.keyboard = yes` and the chosen `hw.ramSize` / `hw.cpu.ncore` / `disk.dataPartition.size` in `config.ini` | `simctl create NAME TYPE RUNTIME` |
+| device types | `avdmanager list device -c`; screen size from `<sdk>/skins/<id>/layout` when that skin is installed | `simctl list devicetypes --json`; screen size from each type's `profile.plist` |
+| edit hardware | `config.ini` (`hw.ramSize`, `hw.cpu.ncore`, `disk.dataPartition.size`) | not applicable |
 
 iOS runtimes cannot be downloaded from sims. Use `xcodebuild -downloadPlatform iOS` and refresh.
 

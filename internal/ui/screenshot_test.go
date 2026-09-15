@@ -101,11 +101,10 @@ func TestGenerateScreenshots(t *testing.T) {
 		dv := a.stack[0].(*devicesView)
 		dv.table.Select(2, 0)
 		d, _ := dv.selected()
-		lv := newLogsView(a, d)
+		lv := newLogsView(a, d, &device.App{Name: "Sample App", BundleID: "com.example.sample"})
 		a.stack = append(a.stack, lv)
 		a.body.AddAndSwitchToPage(lv.Name(), lv.Primitive(), true)
 		a.tv.SetFocus(lv.Primitive())
-		lv.filter = "Sample"
 		lv.append([]string{
 			"09-15 15:29:58.101 I/ActivityManager(  612): Start proc 8123:com.example.sample/u0a212 for pre-top-activity",
 			"09-15 15:29:58.402 I/Unity   ( 8123): Sample: boot sequence started",
