@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
@@ -38,14 +39,18 @@ func (f *fakeProvider) Apps(context.Context, device.Device) ([]device.App, error
 		{BundleID: "com.android.phone", Name: "Phone", System: true, Source: "preinstalled"},
 	}, nil
 }
-func (f *fakeProvider) InstallApp(context.Context, device.Device, string) error    { return nil }
-func (f *fakeProvider) UninstallApp(context.Context, device.Device, string) error  { return nil }
-func (f *fakeProvider) LaunchApp(context.Context, device.Device, string) error     { return nil }
-func (f *fakeProvider) LogCmd(context.Context, device.Device) (*exec.Cmd, error)   { return nil, nil }
-func (f *fakeProvider) Images(context.Context) ([]device.Image, error)             { return nil, nil }
-func (f *fakeProvider) InstallImage(context.Context, device.Image) error           { return nil }
-func (f *fakeProvider) Create(context.Context, string, device.Image, string) error { return nil }
-func (f *fakeProvider) DeviceTypes(context.Context) ([]string, error)              { return nil, nil }
+func (f *fakeProvider) InstallApp(context.Context, device.Device, string) error   { return nil }
+func (f *fakeProvider) UninstallApp(context.Context, device.Device, string) error { return nil }
+func (f *fakeProvider) LaunchApp(context.Context, device.Device, string) error    { return nil }
+func (f *fakeProvider) LogCmd(context.Context, device.Device, *device.App) (*exec.Cmd, error) {
+	return nil, nil
+}
+func (f *fakeProvider) Images(context.Context) ([]device.Image, error)   { return nil, nil }
+func (f *fakeProvider) InstallImage(context.Context, device.Image) error { return nil }
+func (f *fakeProvider) Create(context.Context, string, device.Image, string, *device.Hardware) error {
+	return nil
+}
+func (f *fakeProvider) DeviceTypes(context.Context) ([]device.DeviceType, error) { return nil, nil }
 
 func runHeadless(t *testing.T, a *App) (tcell.SimulationScreen, func()) {
 	t.Helper()
@@ -95,7 +100,7 @@ func TestApp_DevicesRender(t *testing.T) {
 		{ID: "R3C", Name: "SM S928N", Platform: device.PlatformAndroid, Kind: device.KindPhysical, Transport: device.TransportUSB, State: device.StateConnected, Serial: "R3C"},
 	}}
 	ios := &fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
-		{ID: "udid1", Name: "iPhone 17", Platform: device.PlatformIOS, Kind: device.KindVirtual, Transport: device.TransportSim, Runtime: "iOS 26.4", State: device.StateShutdown},
+		{ID: "udid1", Name: "iPhone 17", Platform: device.PlatformIOS, Kind: device.KindVirtual, Transport: device.TransportSim, Runtime: "iOS 26.4", State: device.StateShutdown, LastActiveAt: time.Now().Add(-time.Hour)},
 	}}
 	a := New("test", android, ios)
 	_, stop := runHeadless(t, a)
@@ -343,7 +348,7 @@ func TestCreateView_ArrowNavigation(t *testing.T) {
 
 	var cv *createView
 	a.tv.QueueUpdate(func() {
-		cv = newCreateView(a, a.providers[device.PlatformAndroid], device.Image{ID: "img", Name: "img", Version: "1"}, []string{"pixel_7", "pixel_8"})
+		cv = newCreateView(a, a.providers[device.PlatformAndroid], device.Image{ID: "img", Name: "img", Version: "1"}, []device.DeviceType{{ID: "pixel_7", Name: "pixel_7", Screen: "1080x2400"}, {ID: "pixel_8", Name: "pixel_8"}})
 		a.push(cv)
 	})
 	press := func(k tcell.Key) {
@@ -602,7 +607,10 @@ func TestDevicesView_EnterOnStoppedDeviceBootsThenOpensApps(t *testing.T) {
 			t.Errorf("front page = %q, want confirm modal", name)
 			return
 		}
-		prim.(*tview.Modal).InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+		// No comes first so a stray enter is harmless; move to Yes before confirming
+		handler := prim.(*tview.Modal).InputHandler()
+		handler(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
+		handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
 	})
 	waitFor(t, a, 10*time.Second, func() bool { _, ok := a.top().(*appsView); return ok })
 	if n := bp.calls(); n != 1 {
@@ -678,5 +686,357 @@ func TestRenderHints_DropsWholeColumnsThatDoNotFit(t *testing.T) {
 	}
 	if strings.Contains(narrow, "thi") {
 		t.Errorf("a column must never be cut mid-word: %q", narrow)
+	}
+}
+
+func TestLogsView_WrapToggle(t *testing.T) {
+	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	_, stop := runHeadless(t, a)
+	defer stop()
+	var title string
+	var nowrap bool
+	onUI(a, func() {
+		lv := newLogsView(a, device.Device{Name: "dev", State: device.StateBooted}, nil)
+		lv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone))
+		title, nowrap = lv.text.GetTitle(), lv.nowrap
+	})
+	if !nowrap || !strings.Contains(title, "[nowrap]") {
+		t.Errorf("w should turn wrapping off and mark the title, got nowrap=%v title=%q", nowrap, title)
+	}
+}
+
+func TestDevicesView_RefreshesWhileShuttingDown(t *testing.T) {
+	bp := &bootProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
+		{ID: "u1", Name: "iPhone", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShuttingDown},
+	}}}
+	a := New("test", bp)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return len(dv.devices) == 1 && dv.devices[0].State == device.StateShuttingDown })
+	bp.mu.Lock()
+	bp.devices[0].State = device.StateShutdown
+	bp.mu.Unlock()
+	waitFor(t, a, 6*time.Second, func() bool { return dv.devices[0].State == device.StateShutdown })
+}
+
+func TestPrompt_EmptyEnterClearsFilter(t *testing.T) {
+	a := New("test", &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+		{ID: "a", Name: "alpha", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+		{ID: "b", Name: "beta", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+	}})
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 3 })
+
+	var rows int
+	onUI(a, func() { dv.filter = "alpha"; dv.render(); rows = dv.table.GetRowCount() })
+	if rows != 2 {
+		t.Fatalf("filtered rows = %d, want 2", rows)
+	}
+	var initial string
+	onUI(a, func() {
+		dv.onKey(tcell.NewEventKey(tcell.KeyRune, '/', tcell.ModNone))
+		in := a.tv.GetFocus().(*tview.InputField)
+		initial = in.GetText()
+		in.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+		rows = dv.table.GetRowCount()
+	})
+	if initial != "" {
+		t.Errorf("/ should open an empty prompt, not carry %q over", initial)
+	}
+	if rows != 3 || dv.filter != "" {
+		t.Errorf("empty enter should clear the filter: rows=%d filter=%q", rows, dv.filter)
+	}
+}
+
+func TestHighlight(t *testing.T) {
+	if got := highlight("Pixel_7_API_35", "pixel"); got != "[black:yellow]Pixel[-:-]_7_API_35" {
+		t.Errorf("highlight = %q", got)
+	}
+	if got := highlight("abcabc", "B"); got != "a[black:yellow]b[-:-]ca[black:yellow]b[-:-]c" {
+		t.Errorf("highlight = %q", got)
+	}
+	// whatever the markup, the visible text must be the original, brackets included
+	for _, c := range []struct{ text, needle string }{{"tag [x] here", "x"}, {"[red]literal[-]", "lit"}, {"nothing", "zzz"}, {"plain", ""}} {
+		tv := tview.NewTextView().SetDynamicColors(true)
+		tv.SetText(highlight(c.text, c.needle))
+		if got := tv.GetText(true); got != c.text {
+			t.Errorf("visible text for (%q, %q) = %q", c.text, c.needle, got)
+		}
+	}
+}
+
+func TestDevicesView_RefreshKeepsSelectedDeviceNotRow(t *testing.T) {
+	bp := &bootProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+		{ID: "a", Name: "a", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+		{ID: "b", Name: "b", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+		{ID: "c", Name: "c", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+	}}}
+	a := New("t", bp)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 4 })
+	var first string
+	onUI(a, func() { d, _ := dv.selected(); first = d.ID })
+	if first != "c" {
+		t.Fatalf("first render should select the top row (c sorts first by name desc), got %q", first)
+	}
+	// pick b, then make c boot so the order changes; the highlight must follow b
+	onUI(a, func() { dv.table.Select(2, 0) })
+	bp.mu.Lock()
+	bp.devices[2].State = device.StateBooted
+	bp.mu.Unlock()
+	onUI(a, func() { dv.Refresh() })
+	waitFor(t, a, 5*time.Second, func() bool { return dv.devices[0].State == device.StateBooted })
+	var after string
+	onUI(a, func() { d, _ := dv.selected(); after = d.ID })
+	if after != "b" {
+		t.Errorf("selection should stay on device b after a re-sort, got %q", after)
+	}
+}
+
+type hwProvider struct {
+	fakeProvider
+	mu    sync.Mutex
+	saved device.Hardware
+}
+
+func (h *hwProvider) Hardware(context.Context, device.Device) (device.Hardware, error) {
+	return device.Hardware{RAMMB: 2048, Cores: 4, DiskGB: 6}, nil
+}
+
+func (h *hwProvider) SetHardware(_ context.Context, _ device.Device, hw device.Hardware) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.saved = hw
+	return nil
+}
+
+func TestDevicesView_EditHardware(t *testing.T) {
+	hp := &hwProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+	}}}
+	a := New("t", hp)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 })
+
+	onUI(a, func() { dv.onKey(tcell.NewEventKey(tcell.KeyRune, 'e', tcell.ModNone)) })
+	waitFor(t, a, 5*time.Second, func() bool { _, ok := a.top().(*hardwareView); return ok })
+	onUI(a, func() {
+		hv := a.top().(*hardwareView)
+		if got := hv.form.GetFormItem(0).(*tview.InputField).GetText(); got != "2048" {
+			t.Errorf("ram prefilled = %q", got)
+		}
+		hv.form.GetFormItem(0).(*tview.InputField).SetText("4096")
+		hv.form.GetFormItem(2).(*tview.InputField).SetText("16")
+		hv.form.GetButton(0).InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	})
+	waitFor(t, a, 5*time.Second, func() bool {
+		hp.mu.Lock()
+		defer hp.mu.Unlock()
+		return hp.saved == (device.Hardware{RAMMB: 4096, Cores: 4, DiskGB: 16})
+	})
+}
+
+func TestCreateView_HardwareFieldsOnlyForEditors(t *testing.T) {
+	plain := New("t", &fakeProvider{platform: device.PlatformIOS})
+	_, stopPlain := runHeadless(t, plain)
+	defer stopPlain()
+	var items int
+	onUI(plain, func() {
+		cv := newCreateView(plain, plain.providers[device.PlatformIOS], device.Image{Name: "iOS 26.5"}, []device.DeviceType{{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", Name: "iPhone 17 Pro", Screen: "1206x2622 @3x"}})
+		items = cv.form.GetFormItemCount()
+		label := cv.form.GetFormItem(1).(*tview.InputField).GetText()
+		if !strings.Contains(label, "iPhone 17 Pro (iPhone-17-Pro)") || !strings.Contains(label, "1206x2622 @3x") {
+			t.Errorf("device type label = %q", label)
+		}
+	})
+	if items != 2 {
+		t.Errorf("ios form items = %d, want 2 (no hardware fields)", items)
+	}
+
+	hw := New("t", &hwProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid}})
+	_, stopHW := runHeadless(t, hw)
+	defer stopHW()
+	onUI(hw, func() {
+		cv := newCreateView(hw, hw.providers[device.PlatformAndroid], device.Image{Name: "img"}, nil)
+		items = cv.form.GetFormItemCount()
+	})
+	if items != 5 {
+		t.Errorf("android form items = %d, want 5 (name, type, ram, cores, disk)", items)
+	}
+}
+
+func TestReadHardwareFields_RejectsGarbage(t *testing.T) {
+	form := tview.NewForm()
+	addHardwareFields(form, device.Hardware{RAMMB: 2048, Cores: 4, DiskGB: 6})
+	form.GetFormItem(1).(*tview.InputField).SetText("many")
+	if _, err := readHardwareFields(form, 0); err == nil || !strings.Contains(err.Error(), "cpu cores") {
+		t.Errorf("expected a cpu cores error, got %v", err)
+	}
+	form.GetFormItem(1).(*tview.InputField).SetText("")
+	hw, err := readHardwareFields(form, 0)
+	if err != nil || hw != (device.Hardware{RAMMB: 2048, Cores: 0, DiskGB: 6}) {
+		t.Errorf("blank means unchanged: %+v %v", hw, err)
+	}
+}
+
+func TestDeviceTypeLabels_AlignScreens(t *testing.T) {
+	labels := deviceTypeLabels([]device.DeviceType{
+		{ID: "pixel_7", Name: "pixel_7", Screen: "1080x2400"},
+		{ID: "pixel_9_pro_xl", Name: "pixel_9_pro_xl", Screen: "1344x2992"},
+		{ID: "pixel_fold", Name: "pixel_fold"},
+	})
+	if strings.Index(labels[0], "1080x2400") != strings.Index(labels[1], "1344x2992") {
+		t.Errorf("screen columns not aligned:\n%q\n%q", labels[0], labels[1])
+	}
+	if labels[2] != "pixel_fold" {
+		t.Errorf("a type without a screen should not carry trailing padding: %q", labels[2])
+	}
+}
+
+func TestDeviceTypeFilterAndResolve(t *testing.T) {
+	types := []device.DeviceType{
+		{ID: "pixel_7", Name: "pixel_7", Screen: "1080x2400"},
+		{ID: "pixel_9_pro", Name: "pixel_9_pro", Screen: "1280x2856"},
+		{ID: "pixel_9_pro_xl", Name: "pixel_9_pro_xl", Screen: "1344x2992"},
+		{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", Name: "iPhone 17 Pro", Screen: "1206x2622 @3x"},
+	}
+	labels := deviceTypeLabels(types)
+	if got := filterLabels(labels, "9 pro"); len(got) != 2 {
+		t.Errorf("filter '9 pro' = %v", got)
+	}
+	if got := filterLabels(labels, "IPHONE"); len(got) != 1 {
+		t.Errorf("filter is case-insensitive: %v", got)
+	}
+	if id, err := resolveDeviceType(types, labels, labels[1]); err != nil || id != "pixel_9_pro" {
+		t.Errorf("exact label -> %q %v", id, err)
+	}
+	if id, err := resolveDeviceType(types, labels, " "+labels[1]+" "); err != nil || id != "pixel_9_pro" {
+		t.Errorf("surrounding whitespace is ignored -> %q %v", id, err)
+	}
+	if id, err := resolveDeviceType(types, labels, "pro_xl"); err != nil || id != "pixel_9_pro_xl" {
+		t.Errorf("unique substring -> %q %v", id, err)
+	}
+	if _, err := resolveDeviceType(types, labels, "pixel"); err == nil {
+		t.Error("ambiguous text must not resolve")
+	}
+	if _, err := resolveDeviceType(types, labels, "galaxy"); err == nil {
+		t.Error("unknown text must not resolve")
+	}
+}
+
+func TestDevicesView_HidesNeverUsedSimulators(t *testing.T) {
+	now := time.Now()
+	a := New("t", &fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
+		{ID: "used", Name: "iPhone 17 Pro", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShutdown, LastActiveAt: now.Add(-time.Hour)},
+		{ID: "fresh1", Name: "iPhone 16", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShutdown},
+		{ID: "fresh2", Name: "iPad mini", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShutdown},
+		{ID: "phone", Name: "my iPhone", Platform: device.PlatformIOS, Kind: device.KindPhysical, State: device.StateOffline},
+	}})
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return len(dv.devices) == 4 })
+	var rows int
+	var title string
+	onUI(a, func() { rows, title = dv.table.GetRowCount(), dv.table.GetTitle() })
+	if rows != 3 || !strings.Contains(title, "+2 unused sims") {
+		t.Errorf("default should hide the 2 never-booted sims: rows=%d title=%q", rows, title)
+	}
+	onUI(a, func() {
+		dv.onKey(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone))
+		rows = dv.table.GetRowCount()
+	})
+	if rows != 5 {
+		t.Errorf("s should reveal them: rows=%d", rows)
+	}
+}
+
+func TestImagesView_InstalledOnlyByDefault(t *testing.T) {
+	a := New("t", &fakeProvider{platform: device.PlatformAndroid})
+	_, stop := runHeadless(t, a)
+	defer stop()
+	var rows int
+	var title string
+	onUI(a, func() {
+		iv := newImagesView(a)
+		iv.rows = []imageRow{
+			{platform: device.PlatformAndroid, image: device.Image{ID: "a", Name: "a", Version: "36", Installed: true}},
+			{platform: device.PlatformAndroid, image: device.Image{ID: "b", Name: "b", Version: "35"}},
+			{platform: device.PlatformAndroid, image: device.Image{ID: "c", Name: "c", Version: "34"}},
+		}
+		iv.render()
+		rows, title = iv.table.GetRowCount(), iv.table.GetTitle()
+		iv.onKey(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModNone))
+		if iv.table.GetRowCount() != 4 {
+			t.Errorf("s should show downloadable images too, rows=%d", iv.table.GetRowCount())
+		}
+	})
+	if rows != 2 || !strings.Contains(title, "+2 downloadable") {
+		t.Errorf("default should list installed only: rows=%d title=%q", rows, title)
+	}
+}
+
+func TestLogsView_RedrawKeepsScrollPosition(t *testing.T) {
+	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	screen, stop := runHeadless(t, a)
+	defer stop()
+	var lv *logsView
+	onUI(a, func() {
+		screen.SetSize(120, 30)
+		a.tv.Sync()
+		lv = newLogsView(a, device.Device{Name: "dev", State: device.StateBooted}, nil)
+		a.push(lv)
+		lines := make([]string, 0, 300)
+		for i := range 300 {
+			lines = append(lines, fmt.Sprintf("line %03d", i))
+		}
+		lv.append(lines)
+	})
+	a.tv.QueueUpdateDraw(func() {})
+	var before, after, atEndAfter int
+	onUI(a, func() {
+		lv.text.ScrollTo(40, 0)
+	})
+	a.tv.QueueUpdateDraw(func() {})
+	onUI(a, func() {
+		before, _ = lv.text.GetScrollOffset()
+		lv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone)) // toggles wrap -> redraw
+	})
+	a.tv.QueueUpdateDraw(func() {})
+	onUI(a, func() { after, _ = lv.text.GetScrollOffset() })
+	if before != 40 || after != 40 {
+		t.Errorf("scroll offset before=%d after=%d, want both 40", before, after)
+	}
+	onUI(a, func() { lv.text.ScrollToEnd() })
+	a.tv.QueueUpdateDraw(func() {})
+	onUI(a, func() {
+		lv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone))
+	})
+	a.tv.QueueUpdateDraw(func() {})
+	onUI(a, func() { atEndAfter, _ = lv.text.GetScrollOffset() })
+	if atEndAfter <= 200 {
+		t.Errorf("a view at the end should stay at the end after redraw, offset=%d", atEndAfter)
+	}
+}
+
+func TestDangerNote_PhysicalDelete(t *testing.T) {
+	iphone := dangerNote("delete device", device.Device{Kind: device.KindPhysical, Platform: device.PlatformIOS})
+	if !strings.Contains(iphone, "pairing") {
+		t.Errorf("ios physical note should talk about pairing: %q", iphone)
+	}
+	android := dangerNote("delete device", device.Device{Kind: device.KindPhysical, Platform: device.PlatformAndroid})
+	if !strings.Contains(android, "adb connection") {
+		t.Errorf("android physical note should talk about the adb connection: %q", android)
+	}
+	avd := dangerNote("delete device", device.Device{Kind: device.KindVirtual})
+	if !strings.Contains(avd, "removed for good") {
+		t.Errorf("virtual note = %q", avd)
 	}
 }

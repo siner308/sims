@@ -50,6 +50,7 @@ type simRuntime struct {
 type simDeviceType struct {
 	Identifier string `json:"identifier"`
 	Name       string `json:"name"`
+	BundlePath string `json:"bundlePath"`
 }
 
 func (p *Provider) Info(ctx context.Context) [][2]string {
@@ -114,10 +115,13 @@ func mapState(s string) device.State {
 		return device.StateBooted
 	case "Booting":
 		return device.StateBooting
+	case "Shutting Down":
+		return device.StateShuttingDown
 	case "Shutdown":
 		return device.StateShutdown
 	}
-	return device.StateUnknown
+	// simctl also reports "Creating" while a device is being made; anything unmapped keeps its raw text
+	return device.State(s)
 }
 
 func (p *Provider) Boot(ctx context.Context, d device.Device) error {
@@ -150,9 +154,11 @@ func (p *Provider) Erase(ctx context.Context, d device.Device) error {
 	return err
 }
 
+// For a physical device "delete" forgets the CoreDevice pairing, which is what keeps an unplugged
+// phone in the list; pairing it again (p) brings it back.
 func (p *Provider) Delete(ctx context.Context, d device.Device) error {
 	if d.Kind == device.KindPhysical {
-		return errPhysical
+		return devicectl(ctx, "manage", "unpair", "--device", d.ID, "--quiet")
 	}
 	_, err := simctl(ctx, "delete", d.ID)
 	return err
@@ -177,11 +183,12 @@ func (p *Provider) Apps(ctx context.Context, d device.Device) ([]device.App, err
 		return nil, fmt.Errorf("plutil: %w", err)
 	}
 	var payload map[string]struct {
-		BundleID string `json:"CFBundleIdentifier"`
-		Name     string `json:"CFBundleDisplayName"`
-		AltName  string `json:"CFBundleName"`
-		Version  string `json:"CFBundleShortVersionString"`
-		Type     string `json:"ApplicationType"`
+		BundleID   string `json:"CFBundleIdentifier"`
+		Name       string `json:"CFBundleDisplayName"`
+		AltName    string `json:"CFBundleName"`
+		Executable string `json:"CFBundleExecutable"`
+		Version    string `json:"CFBundleShortVersionString"`
+		Type       string `json:"ApplicationType"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
 		return nil, err
@@ -196,7 +203,7 @@ func (p *Provider) Apps(ctx context.Context, d device.Device) ([]device.App, err
 		if a.Type != "User" {
 			source = "preinstalled"
 		}
-		apps = append(apps, device.App{BundleID: a.BundleID, Name: name, Version: a.Version, System: a.Type != "User", Source: source})
+		apps = append(apps, device.App{BundleID: a.BundleID, Name: name, Version: a.Version, System: a.Type != "User", Source: source, Process: a.Executable})
 	}
 	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
 	return apps, nil
@@ -226,14 +233,19 @@ func (p *Provider) LaunchApp(ctx context.Context, d device.Device, bundleID stri
 	return err
 }
 
-func (p *Provider) LogCmd(ctx context.Context, d device.Device) (*exec.Cmd, error) {
+func (p *Provider) LogCmd(ctx context.Context, d device.Device, app *device.App) (*exec.Cmd, error) {
 	if !d.Running() {
 		return nil, errors.New("device is not running")
 	}
 	if d.Kind == device.KindPhysical {
-		return physicalLogCmd(ctx, d)
+		return physicalLogCmd(ctx, d, app)
 	}
-	return exec.CommandContext(ctx, "xcrun", "simctl", "spawn", d.ID, "log", "stream", "--style", "compact"), nil
+	args := []string{"simctl", "spawn", d.ID, "log", "stream", "--style", "compact"}
+	if app != nil {
+		// the logger's process is the executable (CFBundleExecutable), which can differ from the display name
+		args = append(args, "--predicate", fmt.Sprintf(`process == %q OR subsystem == %q`, app.ProcessName(), app.BundleID))
+	}
+	return exec.CommandContext(ctx, "xcrun", args...), nil
 }
 
 func (p *Provider) Images(ctx context.Context) ([]device.Image, error) {
@@ -252,7 +264,7 @@ func (p *Provider) InstallImage(ctx context.Context, img device.Image) error {
 	return errors.New("download runtimes with: xcodebuild -downloadPlatform iOS")
 }
 
-func (p *Provider) Create(ctx context.Context, name string, img device.Image, deviceType string) error {
+func (p *Provider) Create(ctx context.Context, name string, img device.Image, deviceType string, _ *device.Hardware) error {
 	if deviceType == "" {
 		return errors.New("device type is required")
 	}
@@ -260,18 +272,38 @@ func (p *Provider) Create(ctx context.Context, name string, img device.Image, de
 	return err
 }
 
-func (p *Provider) DeviceTypes(ctx context.Context) ([]string, error) {
+// The screen size lives in each device type's profile.plist inside its bundle, not in the simctl JSON.
+func (p *Provider) DeviceTypes(ctx context.Context) ([]device.DeviceType, error) {
 	var payload struct {
 		DeviceTypes []simDeviceType `json:"devicetypes"`
 	}
 	if err := simctlJSON(ctx, &payload, "list", "devicetypes"); err != nil {
 		return nil, err
 	}
-	var types []string
+	var types []device.DeviceType
 	for _, t := range payload.DeviceTypes {
-		types = append(types, t.Identifier)
+		types = append(types, device.DeviceType{ID: t.Identifier, Name: t.Name, Screen: screenFromProfile(ctx, t.BundlePath)})
 	}
 	return types, nil
+}
+
+func screenFromProfile(ctx context.Context, bundlePath string) string {
+	if bundlePath == "" {
+		return ""
+	}
+	out, err := exec.CommandContext(ctx, "plutil", "-convert", "json", "-o", "-", bundlePath+"/Contents/Resources/profile.plist").Output()
+	if err != nil {
+		return ""
+	}
+	var profile struct {
+		Width  int     `json:"mainScreenWidth"`
+		Height int     `json:"mainScreenHeight"`
+		Scale  float64 `json:"mainScreenScale"`
+	}
+	if json.Unmarshal(out, &profile) != nil || profile.Width == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dx%d @%gx", profile.Width, profile.Height, profile.Scale)
 }
 
 func (p *Provider) runtimes(ctx context.Context) ([]simRuntime, error) {

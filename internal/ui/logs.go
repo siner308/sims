@@ -19,18 +19,20 @@ const logBuffer = 5000
 type logsView struct {
 	app    *App
 	dev    device.Device
+	only   *device.App
 	text   *tview.TextView
 	cancel context.CancelFunc
 	mu     sync.Mutex
 	lines  []string
 	filter string
 	paused bool
+	nowrap bool
 }
 
-func newLogsView(a *App, d device.Device) *logsView {
-	v := &logsView{app: a, dev: d}
-	v.text = tview.NewTextView().SetDynamicColors(false).SetScrollable(true).SetMaxLines(logBuffer)
-	v.text.SetBorder(true).SetTitle(fmt.Sprintf(" logs @ %s ", d.Name))
+func newLogsView(a *App, d device.Device, only *device.App) *logsView {
+	v := &logsView{app: a, dev: d, only: only}
+	v.text = tview.NewTextView().SetDynamicColors(true).SetScrollable(true).SetMaxLines(logBuffer)
+	v.text.SetBorder(true).SetTitle(v.title())
 	v.text.SetInputCapture(v.onKey)
 	return v
 }
@@ -38,7 +40,7 @@ func newLogsView(a *App, d device.Device) *logsView {
 func (v *logsView) Name() string               { return "logs" }
 func (v *logsView) Primitive() tview.Primitive { return v.text }
 func (v *logsView) Hints() []hint {
-	return []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"g", "top"}, {"G", "bottom"}}
+	return []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"G", "bottom"}}
 }
 
 func (v *logsView) Refresh() {
@@ -50,7 +52,7 @@ func (v *logsView) Refresh() {
 	}
 	ctx, cancel := context.WithCancel(v.app.ctx)
 	v.cancel = cancel
-	cmd, err := p.LogCmd(ctx, v.dev)
+	cmd, err := p.LogCmd(ctx, v.dev, v.only)
 	if err != nil {
 		v.app.flashErr(err)
 		return
@@ -111,36 +113,55 @@ func (v *logsView) append(chunk []string) {
 	}
 	for _, l := range chunk {
 		if v.filter == "" || strings.Contains(strings.ToLower(l), strings.ToLower(v.filter)) {
-			fmt.Fprintln(v.text, tview.Escape(l))
+			fmt.Fprintln(v.text, highlight(l, v.filter))
 		}
 	}
 }
 
+// redraw rebuilds the text but keeps the reader's place: a view scrolled up stays where it was,
+// only a view that was already at the end keeps following new lines.
 func (v *logsView) redraw() {
+	row, _ := v.text.GetScrollOffset()
+	_, _, _, height := v.text.GetInnerRect()
+	atEnd := row+height >= v.text.GetOriginalLineCount()
 	v.text.Clear()
 	v.mu.Lock()
 	lines := append([]string(nil), v.lines...)
 	v.mu.Unlock()
 	for _, l := range lines {
 		if v.filter == "" || strings.Contains(strings.ToLower(l), strings.ToLower(v.filter)) {
-			fmt.Fprintln(v.text, tview.Escape(l))
+			fmt.Fprintln(v.text, highlight(l, v.filter))
 		}
 	}
-	v.text.ScrollToEnd()
-	title := fmt.Sprintf(" logs @ %s ", v.dev.Name)
+	if atEnd {
+		v.text.ScrollToEnd()
+	} else {
+		v.text.ScrollTo(row, 0)
+	}
+	title := v.title()
 	if v.filter != "" {
 		title += fmt.Sprintf("/%s ", v.filter)
 	}
 	if v.paused {
 		title += "[paused] "
 	}
+	if v.nowrap {
+		title += "[nowrap] "
+	}
 	v.text.SetTitle(title)
+}
+
+func (v *logsView) title() string {
+	if v.only != nil {
+		return fmt.Sprintf(" logs @ %s / %s ", v.dev.Name, v.only.Name)
+	}
+	return fmt.Sprintf(" logs @ %s ", v.dev.Name)
 }
 
 func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	switch ev.Rune() {
 	case '/':
-		v.app.prompt("filter:", v.filter, func(s string) { v.filter = s; v.redraw() })
+		v.app.prompt("filter:", "", func(s string) { v.filter = s; v.redraw() })
 	case 'c':
 		v.mu.Lock()
 		v.lines = nil
@@ -148,6 +169,10 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.text.Clear()
 	case 'p':
 		v.paused = !v.paused
+		v.redraw()
+	case 'w':
+		v.nowrap = !v.nowrap
+		v.text.SetWrap(!v.nowrap)
 		v.redraw()
 	case 'g':
 		v.text.ScrollToBeginning()

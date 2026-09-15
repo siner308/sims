@@ -172,7 +172,11 @@ func (p *Provider) Erase(ctx context.Context, d device.Device) error {
 
 func (p *Provider) Delete(ctx context.Context, d device.Device) error {
 	if d.Kind == device.KindPhysical {
-		return errPhysical
+		if d.Transport == device.TransportWiFi {
+			_, err := run(ctx, p.sdk.adb(), "disconnect", d.Serial)
+			return err
+		}
+		return errors.New("a USB device leaves the list when it is unplugged")
 	}
 	if d.Serial != "" {
 		return errors.New("shut down the device before deleting")
@@ -294,11 +298,21 @@ func (p *Provider) LaunchApp(ctx context.Context, d device.Device, bundleID stri
 	return nil
 }
 
-func (p *Provider) LogCmd(ctx context.Context, d device.Device) (*exec.Cmd, error) {
+// logcat has no package filter, only --pid, so the app must be running; a restart changes the pid and needs a fresh stream.
+func (p *Provider) LogCmd(ctx context.Context, d device.Device, app *device.App) (*exec.Cmd, error) {
 	if d.Serial == "" {
 		return nil, errors.New("device is not running")
 	}
-	return exec.CommandContext(ctx, p.sdk.adb(), "-s", d.Serial, "logcat", "-v", "time"), nil
+	args := []string{"-s", d.Serial, "logcat", "-v", "time"}
+	if app != nil {
+		out, err := run(ctx, p.sdk.adb(), "-s", d.Serial, "shell", "pidof", "-s", app.BundleID)
+		pid := strings.TrimSpace(out)
+		if err != nil || pid == "" {
+			return nil, fmt.Errorf("%s is not running; launch it first (enter) and open logs again", app.BundleID)
+		}
+		args = append(args, "--pid="+pid)
+	}
+	return exec.CommandContext(ctx, p.sdk.adb(), args...), nil
 }
 
 func (p *Provider) Images(ctx context.Context) ([]device.Image, error) {
@@ -348,7 +362,7 @@ func (p *Provider) InstallImage(ctx context.Context, img device.Image) error {
 	return nil
 }
 
-func (p *Provider) Create(ctx context.Context, name string, img device.Image, deviceType string) error {
+func (p *Provider) Create(ctx context.Context, name string, img device.Image, deviceType string, hw *device.Hardware) error {
 	args := []string{"create", "avd", "-n", name, "-k", img.ID}
 	if deviceType != "" {
 		args = append(args, "-d", deviceType)
@@ -359,19 +373,31 @@ func (p *Provider) Create(ctx context.Context, name string, img device.Image, de
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, tail(out))
 	}
-	return setAVDConfig(name)
+	if err := setAVDConfig(name); err != nil {
+		return err
+	}
+	if hw != nil {
+		return p.SetHardware(ctx, device.Device{ID: name, Kind: device.KindVirtual}, *hw)
+	}
+	return nil
 }
 
-func (p *Provider) DeviceTypes(ctx context.Context) ([]string, error) {
+// Screen size comes from the SDK's skin for the profile when one is installed; avdmanager itself only lists ids.
+func (p *Provider) DeviceTypes(ctx context.Context) ([]device.DeviceType, error) {
 	out, err := run(ctx, p.sdk.avdmanager(), "list", "device", "-c")
 	if err != nil {
 		return nil, err
 	}
-	var types []string
-	for _, l := range lines(out) {
-		if l != "" {
-			types = append(types, l)
+	var types []device.DeviceType
+	for _, id := range lines(out) {
+		if id == "" {
+			continue
 		}
+		t := device.DeviceType{ID: id, Name: id}
+		if layout, err := os.ReadFile(filepath.Join(p.sdk.root, "skins", id, "layout")); err == nil {
+			t.Screen = screenFromSkin(string(layout))
+		}
+		types = append(types, t)
 	}
 	return types, nil
 }

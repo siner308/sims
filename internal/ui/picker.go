@@ -119,7 +119,7 @@ func (v *pickerView) render() {
 		if e.isDir {
 			name, size, color = name+"/", "", tcell.ColorAqua
 		}
-		v.table.SetCell(r, 0, tview.NewTableCell(tview.Escape(name)).SetTextColor(color).SetReference(e))
+		v.table.SetCell(r, 0, tview.NewTableCell(highlight(name, v.filter)).SetTextColor(color).SetReference(e))
 		v.table.SetCell(r, 1, tview.NewTableCell(size).SetAlign(tview.AlignRight).SetTextColor(tcell.ColorGray))
 		v.table.SetCell(r, 2, tview.NewTableCell(relativeTime(e.mod, v.now())).SetTextColor(tcell.ColorGray))
 		r++
@@ -194,7 +194,7 @@ func (v *pickerView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.showHidden = !v.showHidden
 		v.render()
 	case '/':
-		v.app.prompt("filter:", v.filter, func(s string) { v.filter = s; v.render() })
+		v.app.prompt("filter:", "", func(s string) { v.filter = s; v.render() })
 	case 't':
 		v.app.promptPath("path:", v.dir+string(filepath.Separator), func(p string) {
 			p = expandHome(p)

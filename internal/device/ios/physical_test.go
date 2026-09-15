@@ -79,11 +79,23 @@ func TestPhysicalLogCmd_WithoutIdevicesyslog(t *testing.T) {
 		t.Skip("idevicesyslog is installed")
 	}
 	d := device.Device{Kind: device.KindPhysical, Serial: "00008110-000000000000001E", State: device.StateConnected}
-	cmd, err := physicalLogCmd(t.Context(), d)
+	cmd, err := physicalLogCmd(t.Context(), d, nil)
 	if err == nil || cmd != nil {
 		t.Fatalf("want an error pointing at libimobiledevice, got cmd=%v err=%v", cmd, err)
 	}
 	if !strings.Contains(err.Error(), "libimobiledevice") {
 		t.Errorf("error should tell how to install: %v", err)
+	}
+}
+
+func TestMapState(t *testing.T) {
+	cases := map[string]device.State{
+		"Booted": device.StateBooted, "Booting": device.StateBooting, "Shutting Down": device.StateShuttingDown,
+		"Shutdown": device.StateShutdown, "Creating": device.State("Creating"),
+	}
+	for in, want := range cases {
+		if got := mapState(in); got != want {
+			t.Errorf("mapState(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

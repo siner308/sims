@@ -16,10 +16,11 @@ const (
 type State string
 
 const (
-	StateBooted   State = "Booted"
-	StateBooting  State = "Booting"
-	StateShutdown State = "Shutdown"
-	StateUnknown  State = "Unknown"
+	StateBooted       State = "Booted"
+	StateBooting      State = "Booting"
+	StateShuttingDown State = "Shutting Down"
+	StateShutdown     State = "Shutdown"
+	StateUnknown      State = "Unknown"
 
 	StateConnected    State = "Connected"
 	StateOffline      State = "Offline"
@@ -64,7 +65,7 @@ func (d Device) StateRank() int {
 	switch d.State {
 	case StateBooted, StateConnected:
 		return 0
-	case StateBooting:
+	case StateBooting, StateShuttingDown:
 		return 1
 	case StateOffline:
 		return 2
@@ -86,6 +87,15 @@ type App struct {
 	Version  string
 	System   bool   // shipped with the image (system partition / Apple built-in)
 	Source   string // who installed it: "preinstalled", "store", "adb", "simctl", or "" when unknown
+	Process  string // executable name as the OS logger reports it; empty when unknown
+}
+
+// ProcessName is what log filters match on; the display name is the fallback when the executable is unknown.
+func (a App) ProcessName() string {
+	if a.Process != "" {
+		return a.Process
+	}
+	return a.Name
 }
 
 type Image struct {
@@ -107,12 +117,32 @@ type Provider interface {
 	InstallApp(ctx context.Context, d Device, path string) error
 	UninstallApp(ctx context.Context, d Device, bundleID string) error
 	LaunchApp(ctx context.Context, d Device, bundleID string) error
-	// LogCmd returns a long-running process that streams the device log to stdout.
-	LogCmd(ctx context.Context, d Device) (*exec.Cmd, error)
+	// LogCmd returns a long-running process that streams the device log to stdout; a non-nil app narrows it to that app.
+	LogCmd(ctx context.Context, d Device, app *App) (*exec.Cmd, error)
 	Images(ctx context.Context) ([]Image, error)
 	InstallImage(ctx context.Context, img Image) error
-	Create(ctx context.Context, name string, img Image, deviceType string) error
-	DeviceTypes(ctx context.Context) ([]string, error)
+	Create(ctx context.Context, name string, img Image, deviceType string, hw *Hardware) error
+	DeviceTypes(ctx context.Context) ([]DeviceType, error)
+}
+
+// DeviceType is a hardware profile a virtual device can be created from.
+type DeviceType struct {
+	ID     string
+	Name   string
+	Screen string // "1080x2400" plus density or scale when the platform exposes it; empty when unknown
+}
+
+// Hardware is the part of a virtual device's configuration that a user tunes: zero values mean "leave as is".
+type Hardware struct {
+	RAMMB  int
+	Cores  int
+	DiskGB int
+}
+
+// HardwareEditor is implemented by providers whose virtual devices keep editable hardware settings.
+type HardwareEditor interface {
+	Hardware(ctx context.Context, d Device) (Hardware, error)
+	SetHardware(ctx context.Context, d Device, hw Hardware) error
 }
 
 // KeySender is implemented by providers that can inject navigation keys into a running device.

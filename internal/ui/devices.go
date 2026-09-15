@@ -48,6 +48,10 @@ type devicesView struct {
 	filter  string
 	sort    sortSpec
 	now     func() time.Time
+	polling bool
+	// A stock Xcode install lists dozens of simulators that have never been booted (82 here, 8 with a
+	// last boot); they stay out of the list until asked for.
+	showUnused bool
 }
 
 var defaultSort = sortSpec{col: colState}
@@ -66,7 +70,7 @@ func (v *devicesView) Hints() []hint {
 		{"enter", "apps (boots first)"}, {"l", "logs"}, {"b", "boot"},
 		{"ctrl+k", "shutdown"}, {"ctrl+e", "wipe data (keep device)"}, {"ctrl+d", "delete device"},
 		groupBreak,
-		{"n", "new device"}, {"/", "filter"}, {"p", "pair (ios)"},
+		{"n", "new device"}, {"e", "edit hardware (avd)"}, {"s", "show unused sims"}, {"/", "filter"}, {"p", "pair (ios)"},
 		{"w", "connect wifi"}, {"x", "disconnect wifi"},
 		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
@@ -98,6 +102,25 @@ func (v *devicesView) Refresh() {
 		} else {
 			v.app.status.SetText("")
 		}
+		v.pollTransitions()
+	})
+}
+
+// A device in Booting or Shutting Down settles on its own, so the list re-reads itself until it does.
+func (v *devicesView) pollTransitions() {
+	if v.polling || !slices.ContainsFunc(v.devices, func(d device.Device) bool {
+		return d.State == device.StateBooting || d.State == device.StateShuttingDown
+	}) {
+		return
+	}
+	v.polling = true
+	time.AfterFunc(2*time.Second, func() {
+		v.app.tv.QueueUpdateDraw(func() {
+			v.polling = false
+			if v.app.top() == v {
+				v.Refresh()
+			}
+		})
 	})
 }
 
@@ -152,7 +175,10 @@ func (v *devicesView) setSort(col sortColumn) {
 
 func (v *devicesView) render() {
 	v.sortDevices()
-	row, _ := v.table.GetSelection()
+	selectedID := ""
+	if d, ok := v.selected(); ok {
+		selectedID = d.ID
+	}
 	v.table.Clear()
 	headers := append([]string(nil), columnNames[:]...)
 	mark := "^"
@@ -161,17 +187,24 @@ func (v *devicesView) render() {
 	}
 	headers[v.sort.col] += mark
 	setHeader(v.table, headers...)
-	r := 1
+	r, row, hidden := 1, 1, 0
 	for _, d := range v.devices {
+		if !v.showUnused && neverUsedSimulator(d) {
+			hidden++
+			continue
+		}
 		hay := strings.ToLower(d.Name + d.Model + d.Runtime + string(d.Platform) + string(d.Transport))
 		if v.filter != "" && !strings.Contains(hay, strings.ToLower(v.filter)) {
 			continue
 		}
-		v.table.SetCell(r, 0, tview.NewTableCell(string(d.Platform)).SetReference(d))
-		v.table.SetCell(r, 1, tview.NewTableCell(string(d.Transport)))
-		v.table.SetCell(r, 2, tview.NewTableCell(d.Name))
-		v.table.SetCell(r, 3, tview.NewTableCell(d.Model).SetTextColor(tcell.ColorGray))
-		v.table.SetCell(r, 4, tview.NewTableCell(d.Runtime))
+		if d.ID == selectedID {
+			row = r
+		}
+		v.table.SetCell(r, 0, tview.NewTableCell(highlight(string(d.Platform), v.filter)).SetReference(d))
+		v.table.SetCell(r, 1, tview.NewTableCell(highlight(string(d.Transport), v.filter)))
+		v.table.SetCell(r, 2, tview.NewTableCell(highlight(d.Name, v.filter)))
+		v.table.SetCell(r, 3, tview.NewTableCell(highlight(d.Model, v.filter)).SetTextColor(tcell.ColorGray))
+		v.table.SetCell(r, 4, tview.NewTableCell(highlight(d.Runtime, v.filter)))
 		v.table.SetCell(r, 5, tview.NewTableCell(stateColor(d.State)+string(d.State)+"[-]"))
 		v.table.SetCell(r, 6, tview.NewTableCell(relativeTime(d.LastActiveAt, v.now())).SetTextColor(tcell.ColorGray))
 		v.table.SetCell(r, 7, tview.NewTableCell(d.ID).SetTextColor(tcell.ColorGray))
@@ -180,15 +213,21 @@ func (v *devicesView) render() {
 	if r == 1 {
 		v.table.SetCell(1, 0, tview.NewTableCell("[gray]no devices[-]").SetSelectable(false))
 	}
-	if row < 1 || row >= r {
-		row = 1
-	}
 	v.table.Select(row, 0)
+	v.table.ScrollToBeginning()
 	title := " devices "
 	if v.filter != "" {
 		title = fmt.Sprintf(" devices /%s ", v.filter)
 	}
-	v.table.SetTitle(fmt.Sprintf("%s[%d] ", title, r-1))
+	title += fmt.Sprintf("[%d] ", r-1)
+	if hidden > 0 {
+		title += fmt.Sprintf("[gray]+%d unused sims (s)[-] ", hidden)
+	}
+	v.table.SetTitle(title)
+}
+
+func neverUsedSimulator(d device.Device) bool {
+	return d.Platform == device.PlatformIOS && d.Kind == device.KindVirtual && d.LastActiveAt.IsZero() && !d.Running()
 }
 
 func relativeTime(t, now time.Time) string {
@@ -245,8 +284,7 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	}
 	switch ev.Rune() {
 	case '/':
-		v.app.prompt("filter:", v.filter, func(s string) { v.filter = s; v.render() })
-		v.filter = ""
+		v.app.prompt("filter:", "", func(s string) { v.filter = s; v.render() })
 		return nil
 	case 'b':
 		v.act("boot", false, func(p device.Provider, d device.Device) error { return p.Boot(v.app.ctx, d) })
@@ -254,7 +292,7 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.openApps()
 	case 'l':
 		if d, ok := v.selected(); ok {
-			v.app.push(newLogsView(v.app, d))
+			v.app.push(newLogsView(v.app, d, nil))
 		}
 	case 'n':
 		v.app.push(newImagesView(v.app))
@@ -270,6 +308,11 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		})
 	case 'p':
 		v.pair()
+	case 'e':
+		v.editHardware()
+	case 's':
+		v.showUnused = !v.showUnused
+		v.render()
 	case 'h':
 		if d, ok := v.selected(); ok {
 			v.app.sendKey(d, device.KeyHome)
@@ -394,6 +437,31 @@ func (v *devicesView) wireless(fn func(device.Wireless, device.Device) (string, 
 	})
 }
 
+func (v *devicesView) editHardware() {
+	d, ok := v.selected()
+	if !ok {
+		return
+	}
+	p, err := v.app.providerFor(d)
+	if err != nil {
+		v.app.flashErr(err)
+		return
+	}
+	editor, ok := p.(device.HardwareEditor)
+	if !ok || d.Kind != device.KindVirtual {
+		v.app.flashErr(fmt.Errorf("%s has no editable hardware here", d.Name))
+		return
+	}
+	var current device.Hardware
+	v.app.async(func() error {
+		var err error
+		current, err = editor.Hardware(v.app.ctx, d)
+		return err
+	}, func() {
+		v.app.push(newHardwareView(v.app, editor, d, current))
+	})
+}
+
 func (v *devicesView) pair() {
 	d, ok := v.selected()
 	if !ok {
@@ -434,17 +502,23 @@ func (v *devicesView) act(verb string, dangerous bool, fn func(device.Provider, 
 		})
 	}
 	if dangerous {
-		v.app.confirm(fmt.Sprintf("%s %s (%s)?\n\n%s", verb, d.Name, d.Platform, dangerNote(verb)), run)
+		v.app.confirm(fmt.Sprintf("%s %s (%s)?\n\n%s", verb, d.Name, d.Platform, dangerNote(verb, d)), run)
 		return
 	}
 	run()
 }
 
-func dangerNote(verb string) string {
+func dangerNote(verb string, d device.Device) string {
 	switch verb {
 	case "wipe data of":
 		return "Apps, accounts and settings are removed; the device itself stays and boots fresh."
 	case "delete device":
+		if d.Kind == device.KindPhysical {
+			if d.Platform == device.PlatformIOS {
+				return "Removes this Mac's pairing record for the phone so it leaves the list; pair again (p) to bring it back."
+			}
+			return "Drops the adb connection so it leaves the list. Plug it in or connect again (w) to bring it back."
+		}
 		return "The device and its data are removed for good. Create a new one from images (n)."
 	}
 	return ""

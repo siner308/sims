@@ -61,4 +61,14 @@ func TestProvider_DeviceTypes(t *testing.T) {
 	if len(types) == 0 {
 		t.Fatal("no device types")
 	}
+	withScreen := 0
+	for _, dt := range types {
+		if dt.ID == "" {
+			t.Errorf("device type without id: %+v", dt)
+		}
+		if dt.Screen != "" {
+			withScreen++
+		}
+	}
+	t.Logf("%d device types, %d with a screen size", len(types), withScreen)
 }

@@ -33,7 +33,7 @@ func (v *appsView) Hints() []hint {
 	return []hint{
 		{"enter", "launch"}, {"i", "install (os dialog)"}, {"I", "install (tui picker)"}, {"ctrl+u", "uninstall"},
 		groupBreak,
-		{"s", "toggle preinstalled"}, {"l", "logs"}, {"/", "filter"},
+		{"s", "toggle preinstalled"}, {"l", "logs of this app"}, {"/", "filter"},
 		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 	}
@@ -74,8 +74,8 @@ func (v *appsView) render() {
 		if a.System {
 			source = "[gray]" + source + "[-]"
 		}
-		v.table.SetCell(r, 0, tview.NewTableCell(a.Name).SetReference(a))
-		v.table.SetCell(r, 1, tview.NewTableCell(a.BundleID))
+		v.table.SetCell(r, 0, tview.NewTableCell(highlight(a.Name, v.filter)).SetReference(a))
+		v.table.SetCell(r, 1, tview.NewTableCell(highlight(a.BundleID, v.filter)))
 		v.table.SetCell(r, 2, tview.NewTableCell(a.Version))
 		v.table.SetCell(r, 3, tview.NewTableCell(source))
 		r++
@@ -144,9 +144,13 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case ev.Key() == tcell.KeyBackspace, ev.Key() == tcell.KeyBackspace2:
 		v.app.sendKey(v.dev, device.KeyBack)
 	case ev.Rune() == '/':
-		v.app.prompt("filter:", v.filter, func(f string) { v.filter = f; v.render() })
+		v.app.prompt("filter:", "", func(f string) { v.filter = f; v.render() })
 	case ev.Rune() == 'l':
-		v.app.replaceTop(newLogsView(v.app, v.dev))
+		if a, ok := v.selected(); ok {
+			v.app.push(newLogsView(v.app, v.dev, &a))
+		} else {
+			v.app.replaceTop(newLogsView(v.app, v.dev, nil))
+		}
 	default:
 		return ev
 	}

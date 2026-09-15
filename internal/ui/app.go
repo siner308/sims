@@ -221,7 +221,7 @@ func (a *App) onCommand(key tcell.Key) {
 		if text == "apps" || text == "a" {
 			a.replaceTop(newAppsView(a, d))
 		} else {
-			a.replaceTop(newLogsView(a, d))
+			a.replaceTop(newLogsView(a, d, nil))
 		}
 	case "help", "h", "?":
 		a.push(newHelpView(a))
@@ -302,9 +302,25 @@ func (a *App) async(work func() error, then func()) {
 }
 
 func (a *App) confirm(question string, onYes func()) {
-	modal := tview.NewModal().SetText(question).AddButtons([]string{"Yes", "No"})
+	modal := tview.NewModal().SetText(question + "\n\n[gray]y / n, or move with left and right[-]").AddButtons([]string{"No", "Yes"})
 	modal.SetBackgroundColor(tcell.ColorDefault)
 	modal.SetButtonStyle(buttonStyle).SetButtonActivatedStyle(focusStyle)
+	modal.SetFocus(0)
+	// y and n answer directly, the way lazygit and git prompts do
+	modal.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		switch ev.Rune() {
+		case 'y', 'Y':
+			a.body.RemovePage("confirm")
+			a.tv.SetFocus(a.top().Primitive())
+			onYes()
+			return nil
+		case 'n', 'N':
+			a.body.RemovePage("confirm")
+			a.tv.SetFocus(a.top().Primitive())
+			return nil
+		}
+		return ev
+	})
 	modal.SetDoneFunc(func(_ int, label string) {
 		a.body.RemovePage("confirm")
 		a.tv.SetFocus(a.top().Primitive())
@@ -316,6 +332,7 @@ func (a *App) confirm(question string, onYes func()) {
 	a.tv.SetFocus(modal)
 }
 
+// prompt delivers the text on enter, empty included, so a filter can be cleared by wiping the field.
 func (a *App) prompt(label, initial string, onDone func(string)) {
 	in := newInput(label + " ").SetText(initial).SetFieldWidth(0)
 	in.SetDoneFunc(func(key tcell.Key) {
@@ -323,7 +340,7 @@ func (a *App) prompt(label, initial string, onDone func(string)) {
 		a.root.RemoveItem(in)
 		a.root.AddItem(a.status, 1, 0, false)
 		a.tv.SetFocus(a.top().Primitive())
-		if key == tcell.KeyEnter && text != "" {
+		if key == tcell.KeyEnter {
 			onDone(text)
 		}
 	})
@@ -381,13 +398,39 @@ func (a *App) providerFor(d device.Device) (device.Provider, error) {
 	return p, nil
 }
 
-// Form fields get a visible box and the focused element inverts, so the cursor's owner is never ambiguous
-// on a transparent background.
+// Only the focused button is painted (dodger blue, black bold); idle ones are plain dim text, so one
+// filled block on the screen always means "this is where enter goes".
+// Text fields keep a faint box so they still read as inputs when idle.
 var (
-	fieldStyle  = tcell.StyleDefault.Background(tcell.ColorDarkSlateGray).Foreground(tcell.ColorWhite)
-	focusStyle  = tcell.StyleDefault.Background(tcell.ColorDarkCyan).Foreground(tcell.ColorBlack)
-	buttonStyle = tcell.StyleDefault.Background(tcell.ColorDarkSlateGray).Foreground(tcell.ColorWhite)
+	fieldStyle  = tcell.StyleDefault.Background(tcell.NewRGBColor(0x30, 0x34, 0x46)).Foreground(tcell.ColorWhite)
+	focusStyle  = tcell.StyleDefault.Background(tcell.ColorDodgerBlue).Foreground(tcell.ColorBlack).Bold(true)
+	buttonStyle = tcell.StyleDefault.Background(tcell.ColorDefault).Foreground(tcell.ColorGray)
 )
+
+const focusMark = "> "
+
+// Form.Draw re-applies the shared field style to every item, so a per-item colour cannot survive a draw;
+// the label prefix is what marks the focused item.
+func markFocus(item tview.FormItem) {
+	label := item.GetLabel()
+	set := func(l string) {
+		switch it := item.(type) {
+		case *tview.InputField:
+			it.SetLabel(l)
+		case *tview.DropDown:
+			it.SetLabel(l)
+		}
+	}
+	set("  " + label)
+	switch it := item.(type) {
+	case *tview.InputField:
+		it.SetFocusFunc(func() { set(focusMark + label) })
+		it.SetBlurFunc(func() { set("  " + label) })
+	case *tview.DropDown:
+		it.SetFocusFunc(func() { set(focusMark + label) })
+		it.SetBlurFunc(func() { set("  " + label) })
+	}
+}
 
 func newTable() *tview.Table {
 	t := tview.NewTable().SetSelectable(true, false).SetFixed(1, 0)
@@ -413,10 +456,33 @@ func stateColor(s device.State) string {
 	switch s {
 	case device.StateBooted:
 		return "[green]"
-	case device.StateBooting:
+	case device.StateBooting, device.StateShuttingDown:
 		return "[yellow]"
 	case device.StateShutdown:
 		return "[gray]"
 	}
 	return "[red]"
+}
+
+// highlight escapes text for tview and wraps every case-insensitive match of needle in a yellow marker.
+func highlight(text, needle string) string {
+	if needle == "" {
+		return tview.Escape(text)
+	}
+	lower, n := strings.ToLower(text), strings.ToLower(needle)
+	var b strings.Builder
+	i := 0
+	for {
+		j := strings.Index(lower[i:], n)
+		if j < 0 {
+			b.WriteString(tview.Escape(text[i:]))
+			break
+		}
+		b.WriteString(tview.Escape(text[i : i+j]))
+		b.WriteString("[black:yellow]")
+		b.WriteString(tview.Escape(text[i+j : i+j+len(needle)]))
+		b.WriteString("[-:-]")
+		i += j + len(needle)
+	}
+	return b.String()
 }

@@ -186,7 +186,7 @@ func devicectl(ctx context.Context, args ...string) error {
 }
 
 // devicectl has no log streaming; idevicesyslog from libimobiledevice is the CLI that does.
-func physicalLogCmd(ctx context.Context, d device.Device) (*exec.Cmd, error) {
+func physicalLogCmd(ctx context.Context, d device.Device, app *device.App) (*exec.Cmd, error) {
 	bin, err := exec.LookPath("idevicesyslog")
 	if err != nil {
 		return nil, errors.New("idevicesyslog not found: brew install libimobiledevice")
@@ -194,6 +194,9 @@ func physicalLogCmd(ctx context.Context, d device.Device) (*exec.Cmd, error) {
 	args := []string{"-u", d.Serial}
 	if d.Transport == device.TransportWiFi {
 		args = append(args, "-n")
+	}
+	if app != nil {
+		args = append(args, "-p", app.ProcessName())
 	}
 	return exec.CommandContext(ctx, bin, args...), nil
 }
