@@ -224,8 +224,9 @@ func replace(target string, bin []byte) error {
 		}
 		return err
 	}
+	old := ""
 	if runtime.GOOS == "windows" {
-		old := target + ".old"
+		old = target + ".old"
 		_ = os.Remove(old)
 		if err := os.Rename(target, old); err != nil {
 			_ = os.Remove(tmp)
@@ -234,6 +235,9 @@ func replace(target string, bin []byte) error {
 	}
 	if err := os.Rename(tmp, target); err != nil {
 		_ = os.Remove(tmp)
+		if old != "" {
+			_ = os.Rename(old, target)
+		}
 		return err
 	}
 	return nil
