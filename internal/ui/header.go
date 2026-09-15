@@ -72,7 +72,9 @@ func newHeader(version string) *header {
 	return h
 }
 
-func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]device.Provider, missing map[device.Platform]error, onDone func()) {
+// loadFacts gathers tool facts off the UI goroutine and hands them to onDone; the caller stores them
+// on the UI goroutine, because draw reads h.facts there on every usage tick.
+func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]device.Provider, missing map[device.Platform]error, onDone func(facts [][2]string)) {
 	platforms := make([]string, 0, len(providers))
 	for p := range providers {
 		platforms = append(platforms, string(p))
@@ -101,8 +103,7 @@ func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]de
 		if len(tools) > 0 {
 			facts = append(facts, [2]string{"Tools", strings.Join(tools, ", ")})
 		}
-		h.facts = facts
-		onDone()
+		onDone(facts)
 	}()
 }
 

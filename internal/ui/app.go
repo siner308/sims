@@ -83,7 +83,9 @@ func (a *App) build() {
 	a.tv.SetRoot(a.root, true).EnableMouse(false)
 	a.tv.SetInputCapture(a.onKey)
 	a.push(newDevicesView(a))
-	a.header.loadFacts(a.ctx, a.providers, a.missing, func() { a.tv.QueueUpdateDraw(a.drawHeader) })
+	a.header.loadFacts(a.ctx, a.providers, a.missing, func(facts [][2]string) {
+		a.tv.QueueUpdateDraw(func() { a.header.facts = facts; a.drawHeader() })
+	})
 	go pollUsage(a.ctx, 3*time.Second, func(u usage) {
 		a.tv.QueueUpdateDraw(func() { a.header.usage = u; a.drawHeader() })
 	})
