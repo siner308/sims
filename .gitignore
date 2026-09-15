@@ -1,3 +1,4 @@
 /sims
 /dist/
 *.test
+*.gen.json

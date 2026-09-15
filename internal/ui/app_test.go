@@ -405,6 +405,9 @@ func TestHeader_Render(t *testing.T) {
 		t.Error("version should be shown under the logo")
 	}
 	keys := h.keys.GetText(true)
+	if !strings.HasPrefix(strings.TrimLeft(keys, " "), "<:>") {
+		t.Errorf("global keys should lead the hotkey block: %q", strings.SplitN(keys, "\n", 2)[0])
+	}
 	for _, want := range []string{"<b>", "boot", "<ctrl+k>", "shutdown", "<:>", "command", "<ctrl+c>", "quit"} {
 		if !strings.Contains(keys, want) {
 			t.Errorf("hotkeys missing %q in %q", want, keys)
@@ -424,7 +427,7 @@ func TestHeader_Render(t *testing.T) {
 
 func TestRenderHints_GroupsAreColumns(t *testing.T) {
 	hints := []hint{{"a", "1"}, {"b", "2"}, groupBreak, {"c", "3"}, groupBreak, {"d", "4"}, {"e", "5"}, {"f", "6"}, {"g", "7"}}
-	lines := strings.Split(strings.TrimRight(renderHints(hints), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(renderHints(hints, 0), "\n"), "\n")
 	if len(lines) != 4 {
 		t.Fatalf("rows = %d, want 4 (tallest group)", len(lines))
 	}
@@ -660,4 +663,20 @@ func TestDevicesView_WOnIOSPhoneConnects(t *testing.T) {
 	}
 	onUI(a, func() { dv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone)) })
 	waitFor(t, a, 2*time.Second, func() bool { return cp.connected.Load() == 1 })
+}
+
+func TestRenderHints_DropsWholeColumnsThatDoNotFit(t *testing.T) {
+	hints := []hint{{"a", "first"}, groupBreak, {"bb", "second"}, groupBreak, {"ccc", "third"}}
+	full := renderHints(hints, 0)
+	if !strings.Contains(full, "third") {
+		t.Fatalf("unbounded render lost a column: %q", full)
+	}
+	// column widths: "<a> first" = 3+1+5+2 = 11, "<bb> second" = 4+1+6+2 = 13, "<ccc> third" = 5+1+5+2 = 13
+	narrow := renderHints(hints, 30)
+	if !strings.Contains(narrow, "second") || strings.Contains(narrow, "third") {
+		t.Errorf("width 30 should keep two columns and drop the third whole: %q", narrow)
+	}
+	if strings.Contains(narrow, "thi") {
+		t.Errorf("a column must never be cut mid-word: %q", narrow)
+	}
 }

@@ -1,24 +1,27 @@
-# sims
+<p align="center">
+  <img src="docs/img/logo.png" alt="sims logo" width="220">
+</p>
 
-k9s-style terminal UI for Android emulators, iOS simulators, and the physical devices plugged in or on the same wifi.
+<h1 align="center">sims</h1>
 
-```
- sims dev  android+ios
- devices
- <b> boot  <ctrl+k> shutdown  <ctrl+e> erase  <ctrl+d> delete  <a>/<enter> apps  <l> logs  <n> new  <w> wifi  <x> disconnect
-┌ devices [5] ─────────────────────────────────────────────────────────────────────────────┐
-│ PLATFORM  VIA   NAME             MODEL          RUNTIME      STATE      ID                │
-│ android   usb   SM S928N         e1q            Android 15   Connected  R3CT40ABCDE       │
-│ android   wifi  Pixel 7          panther        Android 14   Connected  192.168.0.23:5555 │
-│ android   avd   Pixel_7_API_35                  API 35       Booted     Pixel_7_API_35    │
-│ ios       wifi  jeonghyun.an     iPhone 14 Pro  iOS 27.0     Offline    BBBBC218-A593-... │
-│ ios       sim   iPhone 17 Pro                   iOS 26.4     Shutdown   0728E045-9CAF-... │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">Android emulators, iOS simulators and real phones, in one k9s-style terminal UI.</p>
 
-`VIA` says how the device is reached: `avd` and `sim` are virtual, `usb` and `wifi` are physical. Boot, shutdown, erase and delete apply to virtual devices only.
+<p align="center">
+  <a href="https://github.com/siner308/sims/actions/workflows/ci.yml"><img src="https://github.com/siner308/sims/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="https://github.com/siner308/sims/releases"><img src="https://img.shields.io/github/v/release/siner308/sims?include_prereleases&sort=semver" alt="release"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/siner308/sims" alt="go version"></a>
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platforms">
+</p>
 
-`LAST` is when the device was last booted (AVD: mtime of `emu-launch-params.txt`; simulator: `lastBootedAt`) or last connected (iOS device: `lastConnectionDate`). adb exposes no such record for Android phones, so they show `-`.
+**sims** is a terminal UI for the devices a mobile developer keeps around: Android emulators, iOS simulators, and the phones plugged in over USB or sitting on the same wifi. It wraps `adb`, `emulator`, `avdmanager`, `sdkmanager`, `xcrun simctl` and `xcrun devicectl` behind one k9s-style screen, so booting, installing a build, tailing logs or wiping a device is a keystroke instead of a command you have to remember.
+
+<p align="center">
+  <img src="docs/img/devices.svg" alt="devices view" width="100%">
+</p>
+
+## Why
+
+Android Studio and Xcode both ship a device manager, and both take a while to open when all you want is "boot that emulator and put this APK on it". The command line tools underneath are scattered across two SDKs with different argument styles. sims puts them on one screen with the same keys for both platforms, and adds what the GUI managers leave out: which phones are reachable right now, how they are connected, and when each device was last used.
 
 ## Install
 
@@ -34,7 +37,7 @@ SIMS_VERSION=v0.1.0 SIMS_INSTALL_DIR=$HOME/bin sh -c "$(curl -fsSL https://raw.g
 
 Windows: download `sims_windows_amd64.zip` (or `arm64`) from the [releases page](https://github.com/siner308/sims/releases), unzip, and put `sims.exe` on your `PATH`.
 
-Manual download for any OS: every release ships `sims_<os>_<arch>.tar.gz` (`.zip` on Windows) plus `checksums.txt`.
+Every release ships `sims_<os>_<arch>.tar.gz` (`.zip` on Windows) plus `checksums.txt`, which `install.sh` verifies.
 
 With a Go toolchain (the module is public, so this works from any machine, mirrors included):
 
@@ -53,6 +56,46 @@ Either platform is enough; the header shows what was found.
 | android | `adb`, `emulator`, `avdmanager`, `sdkmanager`; `aapt2` (build-tools) for app names | `ANDROID_HOME` or `ANDROID_SDK_ROOT`, then the default SDK path (`~/Library/Android/sdk`, `%LOCALAPPDATA%\Android\Sdk`, `~/Android/Sdk`), then `PATH` |
 | ios | Xcode command line tools (`xcrun simctl`, `xcrun devicectl`) | macOS only. Physical-device logs also need `idevicesyslog` (`brew install libimobiledevice`) |
 
+## Tour
+
+### Devices
+
+Everything in one table: `VIA` says how a device is reached (`avd` and `sim` are virtual, `usb` and `wifi` are physical), `STATE` is colored, `LAST` is the last boot or last connection. Running devices sort first, then the most recently used. `shift+letter` sorts by a column; the same key again flips the direction.
+
+`enter` opens the apps of the selected device. On a stopped virtual device it asks to boot it first and opens apps once it is up.
+
+### Apps
+
+<p align="center">
+  <img src="docs/img/apps.svg" alt="apps view" width="100%">
+</p>
+
+Apps you installed come first with their display name and version; preinstalled apps are hidden until you press `s`. `SOURCE` tells `adb` sideloads from `store` installs. `i` opens the OS file dialog (Finder, Explorer) to pick an `.apk` or `.app`; `I` opens the built-in file picker instead.
+
+### Logs
+
+<p align="center">
+  <img src="docs/img/logs.svg" alt="logs view" width="100%">
+</p>
+
+Live `logcat` or `log stream` with a substring filter, pause, and clear. Works for simulators and for physical devices (`idevicesyslog` on iOS).
+
+### Images and new devices
+
+<p align="center">
+  <img src="docs/img/images.svg" alt="images view" width="100%">
+</p>
+
+Installed system images and iOS runtimes first, then everything `sdkmanager` can fetch. `enter` on an installed image opens a small form (name, device profile) and creates the AVD or simulator. Android images install from here with `i`; iOS runtimes come from `xcodebuild -downloadPlatform iOS`.
+
+### Help
+
+<p align="center">
+  <img src="docs/img/help.svg" alt="help view" width="100%">
+</p>
+
+`?` lists every key for the current view, plus commands and navigation.
+
 ## Keys
 
 | Scope | Key | Action |
@@ -69,14 +112,14 @@ Either platform is enough; the header shows what was found.
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
 | devices | `shift+P` `V` `N` `M` `R` `S` `L` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
 | apps | `enter` / `i` / `I` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |
-| picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
+| picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
 | logs | `/` `c` `p` `g` `G` | filter, clear, pause, top, bottom |
 | images | `n` or `enter` / `i` | new device from image / install image (android) |
 
-Anything that stops or removes something (shutdown, wipe, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; wipe, delete and uninstall also ask for confirmation, and the prompt spells out what is lost. `ctrl+s` was avoided because terminals with XON/XOFF flow control on may swallow it before it reaches sims.
+Anything that stops or removes something (shutdown, wipe, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; wipe, delete and uninstall also ask for confirmation, and the prompt spells out what is lost.
 
-## Keyboard and nav keys on Android emulators
+## Android emulators: keyboard and nav keys
 
 avdmanager writes `hw.keyboard = no` (the emulator default). With that setting the guest gets no keyboard input device at all (`adb shell getevent -pl` lists only `gpio-keys` and touch devices; with `yes` a `qwerty2` device appears), so typing from the host is dropped, and the toolbar's Back / Home / Overview buttons appear to go the same way. sims sets it to `yes` when it creates an AVD and again on every boot, so an AVD booted through sims gets a keyboard on its next start. The same pass sets `hw.gpu.enabled = yes`, `hw.camera.front = emulated`, and `PlayStore.enabled = yes` on `google_apis_playstore` images. RAM (`hw.ramSize`), heap (`vm.heapSize`) and `/data` size (`disk.dataPartition.size`) are left alone; edit `config.ini` per project.
 
@@ -100,7 +143,7 @@ A paired phone on the same wifi shows as `Offline` until a CoreDevice tunnel is 
 | shutdown | `adb emu kill` | `simctl shutdown UDID` |
 | erase | `emulator -avd NAME -wipe-data` | `simctl erase UDID` |
 | delete | `avdmanager delete avd -n NAME` | `simctl delete UDID` |
-| apps | `adb shell pm list packages -f -i` (+ `-3` to tell yours from preinstalled; `installer=` tells adb from store). Apps you installed get their display name and version from `aapt2 dump badging` on the pulled APK, cached under the user cache dir; preinstalled apps keep the package name | sim: `simctl listapps` (via `plutil`, `ApplicationType`), device: `devicectl device info apps` (+ `--include-all-apps`) |
+| apps | `adb shell pm list packages -f -i` (+ `-3` to tell yours from preinstalled; `installer=` tells adb from store). Apps you installed get their display name and version from `aapt2 dump badging` on the pulled APK, cached under the user cache dir; preinstalled apps keep the package name | sim: `simctl listapps` (via `plutil`), device: `devicectl device info apps` (+ `--include-all-apps`) |
 | install / uninstall / launch | `adb install -r`, `adb uninstall`, `cmd package resolve-activity` + `am start -n` | sim: `simctl install/uninstall/launch`, device: `devicectl device install app / uninstall app / process launch` |
 | logs | `adb logcat -v time` | sim: `simctl spawn UDID log stream`, device: `idevicesyslog -u UDID` |
 | wifi / pair | `adb tcpip 5555`, `adb connect`, `adb pair`, `adb disconnect` | `devicectl manage pair`, `devicectl device info details` (opens the tunnel) |
@@ -115,6 +158,14 @@ iOS runtimes cannot be downloaded from sims. Use `xcodebuild -downloadPlatform i
 go build ./cmd/sims
 go test ./... -race    # parsers run everywhere; provider and UI tests skip when the toolchain is absent
 GOOS=windows go build ./cmd/sims
+
+SIMS_SCREENSHOTS=1 go test ./internal/ui -run TestGenerateScreenshots   # regenerates docs/img/*.svg
 ```
 
+Screenshots are rendered from the same views on tcell's simulation screen with fixture devices, so they stay in step with the code.
+
 Releases are cut by tagging: `git tag v0.1.0 && git push origin v0.1.0` runs GoReleaser in GitHub Actions and publishes the archives and `checksums.txt` that `install.sh` downloads. GoReleaser releases to whichever repo runs the workflow, so a mirror that receives the tag gets its own release.
+
+## Acknowledgements
+
+The layout, the `:` command bar and the hotkey block are borrowed from [k9s](https://github.com/derailed/k9s). Built with [tview](https://github.com/rivo/tview) and [tcell](https://github.com/gdamore/tcell).

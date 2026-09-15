@@ -39,13 +39,15 @@ const logoText = ` ___(_)_ __ ___  ___
 |___/_|_| |_| |_|___/`
 
 type header struct {
-	flex   *tview.Flex
-	info   *tview.TextView
-	keys   *tview.TextView
-	logo   *tview.TextView
-	facts  [][2]string
-	usage  usage
-	height int
+	flex      *tview.Flex
+	info      *tview.TextView
+	keys      *tview.TextView
+	logo      *tview.TextView
+	facts     [][2]string
+	usage     usage
+	height    int
+	hints     []hint
+	keysWidth int
 }
 
 func newHeader(version string) *header {
@@ -59,6 +61,14 @@ func newHeader(version string) *header {
 	h.flex.AddItem(h.info, 60, 0, false).
 		AddItem(h.keys, 0, 1, false).
 		AddItem(h.logo, 24, 0, false)
+	// the panel only learns its width while drawing, so the column fit is decided there
+	h.keys.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		if width != h.keysWidth {
+			h.keysWidth = width
+			h.keys.SetText(renderHints(h.hints, width))
+		}
+		return x, y, width, height
+	})
 	return h
 }
 
@@ -80,7 +90,7 @@ func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]de
 				fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				for _, f := range d.Info(fctx) {
 					if f[0] == "Android SDK" {
-						facts = append(facts, f)
+						facts = append(facts, [2]string{f[0], shortenHome(f[1])})
 						continue
 					}
 					tools = append(tools, f[0]+" "+f[1])
@@ -98,13 +108,42 @@ func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]de
 
 // draw returns the number of lines the header needs; the app resizes the header row to that.
 func (h *header) draw(hints []hint) int {
-	info := renderFacts(append(append([][2]string(nil), h.facts...), h.usage.facts()...))
-	all := append(append([]hint(nil), hints...), groupBreak)
-	keys := renderHints(append(all, globalHints...))
+	facts := append(append([][2]string(nil), h.facts...), h.usage.facts()...)
+	info := renderFacts(facts)
+	// global keys lead so that a narrow terminal drops the sort column, never quit or help
+	all := append(append([]hint(nil), globalHints...), groupBreak)
+	h.hints = append(all, hints...)
+	keys := renderHints(h.hints, h.keysWidth)
 	h.info.SetText(info)
 	h.keys.SetText(keys)
+	h.flex.ResizeItem(h.info, factsWidth(facts)+2, 0)
 	h.height = max(minHeaderHeight, lineCount(info), lineCount(keys), lineCount(logoText)+1)
 	return h.height
+}
+
+func factsWidth(facts [][2]string) int {
+	label, value := 0, 0
+	for _, f := range facts {
+		label = max(label, len(f[0])+1)
+		value = max(value, len(tview.Escape(stripTags(f[1]))))
+	}
+	return label + 1 + value
+}
+
+func stripTags(s string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range s {
+		switch {
+		case r == '[':
+			depth++
+		case r == ']' && depth > 0:
+			depth--
+		case depth == 0:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func lineCount(s string) int {
@@ -128,7 +167,8 @@ func renderFacts(facts [][2]string) string {
 }
 
 // Each group is one column as tall as the group itself, so nothing wraps and nothing is split.
-func renderHints(hints []hint) string {
+// Columns that would not fit in width are left out whole; width <= 0 means unknown and keeps them all.
+func renderHints(hints []hint, width int) string {
 	var columns [][]hint
 	var cur []hint
 	for _, hn := range hints {
@@ -147,15 +187,27 @@ func renderHints(hints []hint) string {
 	if len(columns) == 0 {
 		return ""
 	}
-	rows := 0
 	keyWidth := make([]int, len(columns))
 	labelWidth := make([]int, len(columns))
 	for c, col := range columns {
-		rows = max(rows, len(col))
 		for _, hn := range col {
 			keyWidth[c] = max(keyWidth[c], len(hn.key)+2)
 			labelWidth[c] = max(labelWidth[c], len(hn.label))
 		}
+	}
+	if width > 0 {
+		used := 0
+		for c := range columns {
+			used += keyWidth[c] + 1 + labelWidth[c] + 2
+			if used > width {
+				columns = columns[:c]
+				break
+			}
+		}
+	}
+	rows := 0
+	for _, col := range columns {
+		rows = max(rows, len(col))
 	}
 	var b strings.Builder
 	for r := 0; r < rows; r++ {
