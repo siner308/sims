@@ -43,6 +43,7 @@ type header struct {
 	info      *tview.TextView
 	keys      *tview.TextView
 	logo      *tview.TextView
+	version   string
 	facts     [][2]string
 	usage     usage
 	height    int
@@ -52,12 +53,13 @@ type header struct {
 
 func newHeader(version string) *header {
 	h := &header{
-		flex: tview.NewFlex().SetDirection(tview.FlexColumn),
-		info: tview.NewTextView().SetDynamicColors(true).SetWrap(false),
-		keys: tview.NewTextView().SetDynamicColors(true).SetWrap(false),
-		logo: tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight),
+		flex:    tview.NewFlex().SetDirection(tview.FlexColumn),
+		info:    tview.NewTextView().SetDynamicColors(true).SetWrap(false),
+		keys:    tview.NewTextView().SetDynamicColors(true).SetWrap(false),
+		logo:    tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight),
+		version: version,
 	}
-	h.logo.SetText("[yellow]" + tview.Escape(logoText) + "[-]\n[gray]" + tview.Escape(version) + "[-]")
+	h.setUpdate("")
 	h.flex.AddItem(h.info, 60, 0, false).
 		AddItem(h.keys, 0, 1, false).
 		AddItem(h.logo, 24, 0, false)
@@ -70,6 +72,15 @@ func newHeader(version string) *header {
 		return x, y, width, height
 	})
 	return h
+}
+
+// setUpdate writes the version under the logo, with the newer release and how to get it when tag is set.
+func (h *header) setUpdate(tag string) {
+	text := "[yellow]" + tview.Escape(logoText) + "[-]\n[gray]" + tview.Escape(h.version) + "[-]"
+	if tag != "" {
+		text += "\n[yellow]" + tview.Escape(tag) + " available[-]\n[gray]:update[-]"
+	}
+	h.logo.SetText(text)
 }
 
 // loadFacts gathers tool facts off the UI goroutine and hands them to onDone; the caller stores them
@@ -118,7 +129,7 @@ func (h *header) draw(hints []hint) int {
 	h.info.SetText(info)
 	h.keys.SetText(keys)
 	h.flex.ResizeItem(h.info, factsWidth(facts)+2, 0)
-	h.height = max(minHeaderHeight, lineCount(info), lineCount(keys), lineCount(logoText)+1)
+	h.height = max(minHeaderHeight, lineCount(info), lineCount(keys), lineCount(h.logo.GetText(true)))
 	return h.height
 }
 

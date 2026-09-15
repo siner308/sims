@@ -10,6 +10,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/update"
 )
 
 type view interface {
@@ -20,25 +21,27 @@ type view interface {
 }
 
 type App struct {
-	tv         *tview.Application
-	root       *tview.Flex
-	header     *header
-	status     *tview.TextView
-	cmd        *tview.InputField
-	body       *tview.Pages
-	providers  map[device.Platform]device.Provider
-	missing    map[device.Platform]error
-	stack      []view
-	statusRows int
-	busy       int // async jobs in flight; the runner shows while it is above zero
-	spinFrame  int
-	spinMsg    string
-	flashText  string // last flash, shown again whenever the status is cleared before flashUntil
-	flashUntil time.Time
-	spinStop   chan struct{}
-	ctx        context.Context
-	cancel     context.CancelFunc
-	version    string
+	tv          *tview.Application
+	root        *tview.Flex
+	header      *header
+	status      *tview.TextView
+	cmd         *tview.InputField
+	body        *tview.Pages
+	providers   map[device.Platform]device.Provider
+	missing     map[device.Platform]error
+	stack       []view
+	statusRows  int
+	busy        int // async jobs in flight; the runner shows while it is above zero
+	spinFrame   int
+	spinMsg     string
+	flashText   string // last flash, shown again whenever the status is cleared before flashUntil
+	flashUntil  time.Time
+	spinStop    chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	version     string
+	newVersion  string // release newer than version, once the startup check has found one
+	applyUpdate func(ctx context.Context, tag string) error
 }
 
 func New(version string, providers ...device.Provider) *App {
@@ -102,6 +105,41 @@ func (a *App) build() {
 func (a *App) Run() error {
 	defer a.cancel()
 	return a.tv.Run()
+}
+
+// CheckUpdates asks latest for the newest release off the UI goroutine and, when it is ahead of the
+// running version, shows it under the logo and offers :update, which runs apply and asks for a restart.
+func (a *App) CheckUpdates(latest func(ctx context.Context) (string, error), apply func(ctx context.Context, tag string) error) {
+	a.applyUpdate = apply
+	go func() {
+		ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+		defer cancel()
+		tag, err := latest(ctx)
+		if err != nil || !update.Newer(a.version, tag) {
+			return
+		}
+		a.tv.QueueUpdateDraw(func() {
+			a.newVersion = tag
+			a.header.setUpdate(tag)
+			a.drawHeader()
+			a.flash("sims " + tag + " is available: run sims update, or :update here")
+		})
+	}()
+}
+
+func (a *App) runUpdate() {
+	if a.newVersion == "" || a.applyUpdate == nil {
+		a.flash("sims " + a.version + " is up to date")
+		return
+	}
+	tag := a.newVersion
+	a.setStatus(" updating to " + tag + "...")
+	a.async(func() error { return a.applyUpdate(a.ctx, tag) }, func() {
+		a.newVersion = ""
+		a.header.setUpdate("")
+		a.drawHeader()
+		a.flash("updated to " + tag + "; quit and start sims again to use it")
+	})
 }
 
 func (a *App) push(v view) {
@@ -235,6 +273,8 @@ func (a *App) onCommand(key tcell.Key) {
 		}
 	case "help", "h", "?":
 		a.push(newHelpView(a))
+	case "update":
+		a.runUpdate()
 	default:
 		if fields := strings.Fields(text); len(fields) >= 2 && (fields[0] == "connect" || fields[0] == "pair") {
 			a.wirelessCommand(fields)

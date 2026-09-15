@@ -1327,3 +1327,24 @@ func TestCreateView_CreateBootsAndSelectsTheNewDevice(t *testing.T) {
 		t.Errorf("the created flash should survive the device list refresh, status = %q", status)
 	}
 }
+
+func TestHeader_UpdateNotice(t *testing.T) {
+	h := newHeader("v0.1.1")
+	h.draw(nil)
+	base := h.height
+	h.setUpdate("v0.1.2")
+	h.draw(nil)
+	logo := h.logo.GetText(true)
+	for _, want := range []string{"v0.1.1", "v0.1.2 available", ":update"} {
+		if !strings.Contains(logo, want) {
+			t.Errorf("logo column missing %q in %q", want, logo)
+		}
+	}
+	if h.height <= base {
+		t.Errorf("header height %d should grow past %d for the two notice lines", h.height, base)
+	}
+	h.setUpdate("")
+	if strings.Contains(h.logo.GetText(true), "available") {
+		t.Error("notice should clear once the update is applied")
+	}
+}
