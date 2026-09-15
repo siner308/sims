@@ -51,8 +51,8 @@ type header struct {
 func newHeader(version string) *header {
 	h := &header{
 		flex: tview.NewFlex().SetDirection(tview.FlexColumn),
-		info: tview.NewTextView().SetDynamicColors(true),
-		keys: tview.NewTextView().SetDynamicColors(true),
+		info: tview.NewTextView().SetDynamicColors(true).SetWrap(false),
+		keys: tview.NewTextView().SetDynamicColors(true).SetWrap(false),
 		logo: tview.NewTextView().SetDynamicColors(true).SetTextAlign(tview.AlignRight),
 	}
 	h.logo.SetText("[yellow]" + tview.Escape(logoText) + "[-]\n[gray]" + tview.Escape(version) + "[-]")
