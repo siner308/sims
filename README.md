@@ -54,6 +54,8 @@ go install github.com/siner308/sims/cmd/sims@latest
 
 `sims update` downloads the latest release for this machine, verifies it against `checksums.txt` and replaces the running binary in place (`sims update --check` only reports). On start, sims looks up the latest release in the background and, when it is newer, shows it under the logo and offers `:update` from the command bar; set `SIMS_NO_UPDATE_CHECK=1` to skip that lookup. The check reads the `releases/latest` redirect, so it does not touch the rate-limited API.
 
+A sims older than v0.1.2 has no `update` command; run the install line above again and it overwrites the binary in place (`SIMS_INSTALL_DIR` if it went somewhere other than the default). `go install github.com/siner308/sims/cmd/sims@latest` does the same for a `go install` build.
+
 ### What sims needs on the machine
 
 `sims doctor` probes every tool below, printing each line as it finishes (the first `xcrun` call after installing or updating Xcode can take a minute), and ends with a copy-paste block of the commands that install whatever is missing; `install.sh` runs it at the end. Either platform is enough; the header shows what was found.
