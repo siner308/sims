@@ -67,7 +67,7 @@ func (v *devicesView) Hints() []hint {
 		{"ctrl+k", "shutdown"}, {"ctrl+e", "wipe data (keep device)"}, {"ctrl+d", "delete device"},
 		groupBreak,
 		{"n", "new device"}, {"/", "filter"}, {"p", "pair (ios)"},
-		{"w", "wifi: android enable / ios connect"}, {"x", "disconnect wifi"},
+		{"w", "connect wifi"}, {"x", "disconnect wifi"},
 		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 		groupBreak,
