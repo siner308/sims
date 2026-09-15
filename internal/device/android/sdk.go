@@ -49,6 +49,10 @@ func (s sdk) emulator() string { return s.bin("emulator", "emulator") }
 func (s sdk) avdmanager() string { return s.script("cmdline-tools", "latest", "bin", "avdmanager") }
 func (s sdk) sdkmanager() string { return s.script("cmdline-tools", "latest", "bin", "sdkmanager") }
 
+// sdkmanager installs into the SDK that contains the binary, not ANDROID_HOME; when it was found on
+// PATH (Homebrew puts it under its own prefix) that would land packages outside the SDK sims uses.
+func (s sdk) sdkRootFlag() string { return "--sdk_root=" + s.root }
+
 func (s sdk) bin(parts ...string) string {
 	p := filepath.Join(append([]string{s.root}, parts...)...)
 	if runtime.GOOS == "windows" {

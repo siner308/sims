@@ -317,7 +317,7 @@ func (p *Provider) LogCmd(ctx context.Context, d device.Device, app *device.App)
 }
 
 func (p *Provider) Images(ctx context.Context) ([]device.Image, error) {
-	out, err := run(ctx, p.sdk.sdkmanager(), "--list")
+	out, err := run(ctx, p.sdk.sdkmanager(), p.sdk.sdkRootFlag(), "--list")
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +354,7 @@ func (p *Provider) Images(ctx context.Context) ([]device.Image, error) {
 
 // sdkmanager prompts for license acceptance on stdin; "y" per prompt is the only way through non-interactively.
 func (p *Provider) InstallImage(ctx context.Context, img device.Image) error {
-	cmd := exec.CommandContext(ctx, p.sdk.sdkmanager(), img.ID)
+	cmd := exec.CommandContext(ctx, p.sdk.sdkmanager(), p.sdk.sdkRootFlag(), img.ID)
 	cmd.Stdin = strings.NewReader(strings.Repeat("y\n", 20))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
