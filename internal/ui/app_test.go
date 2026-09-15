@@ -1064,3 +1064,43 @@ func TestStatus_LongErrorWraps(t *testing.T) {
 		t.Errorf("clearing should shrink the status back to one row, got %d", rows)
 	}
 }
+
+func TestSpinner_RunsWhileBusyAndClears(t *testing.T) {
+	slow := &fakeProvider{platform: device.PlatformAndroid, delay: 700 * time.Millisecond, devices: []device.Device{
+		{ID: "a", Name: "a", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
+	}}
+	a := New("t", slow)
+	_, stop := runHeadless(t, a)
+	defer stop()
+	time.Sleep(350 * time.Millisecond)
+	var text string
+	var rows int
+	onUI(a, func() { text, rows = a.status.GetText(true), a.statusRows })
+	if !strings.Contains(text, ">_ >_") || !strings.Contains(text, "loading devices") || rows < 4 {
+		t.Errorf("runner should be showing with the caption: rows=%d text=%q", rows, text)
+	}
+	var f1, f2 int
+	onUI(a, func() { f1 = a.spinFrame })
+	time.Sleep(400 * time.Millisecond)
+	onUI(a, func() { f2 = a.spinFrame })
+	if f1 == f2 {
+		t.Error("runner frame did not advance")
+	}
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 && a.busy == 0 })
+	onUI(a, func() { text, rows = a.status.GetText(true), a.statusRows })
+	if strings.Contains(text, ">_ >_") || rows != 1 {
+		t.Errorf("runner should be gone after loading: rows=%d text=%q", rows, text)
+	}
+}
+
+func TestRenderRunner_FramesDiffer(t *testing.T) {
+	if renderRunner(0, "x") == renderRunner(1, "x") {
+		t.Error("consecutive frames must differ, otherwise nothing runs")
+	}
+	for i := range runnerFrames {
+		if got := len(runnerFrames[i]); got != 4 {
+			t.Errorf("frame %d has %d rows, want 4", i, got)
+		}
+	}
+}

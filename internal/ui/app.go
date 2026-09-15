@@ -30,6 +30,10 @@ type App struct {
 	missing    map[device.Platform]error
 	stack      []view
 	statusRows int
+	busy       int // async jobs in flight; the runner shows while it is above zero
+	spinFrame  int
+	spinMsg    string
+	spinStop   chan struct{}
 	ctx        context.Context
 	cancel     context.CancelFunc
 	version    string
@@ -278,13 +282,63 @@ func (a *App) selectedDevice() (device.Device, bool) {
 func (a *App) setStatus(text string) {
 	a.status.SetText(text)
 	_, _, width, _ := a.status.GetInnerRect()
-	rows := 1
-	if width > 0 {
-		plain := a.status.GetText(true)
-		rows = min(6, max(1, (len([]rune(plain))+width-1)/width))
+	rows := 0
+	for _, line := range strings.Split(a.status.GetText(true), "\n") {
+		if width > 0 {
+			rows += max(1, (len([]rune(line))+width-1)/width)
+		} else {
+			rows++
+		}
 	}
+	rows = min(8, max(1, rows))
 	a.statusRows = rows
 	a.root.ResizeItem(a.status, rows, 0)
+}
+
+// startSpinner shows the running mascot next to msg until stopSpinner; nested async calls share one runner.
+func (a *App) startSpinner(msg string) {
+	a.busy++
+	if msg != "" {
+		a.spinMsg = msg
+	}
+	if a.spinStop != nil {
+		a.setStatus(renderRunner(a.spinFrame, a.spinMsg))
+		return
+	}
+	a.spinStop = make(chan struct{})
+	stop := a.spinStop
+	a.setStatus(renderRunner(a.spinFrame, a.spinMsg))
+	go func() {
+		t := time.NewTicker(spinnerInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				a.tv.QueueUpdateDraw(func() {
+					if a.spinStop == nil {
+						return
+					}
+					a.spinFrame++
+					a.setStatus(renderRunner(a.spinFrame, a.spinMsg))
+				})
+			}
+		}
+	}()
+}
+
+func (a *App) stopSpinner() {
+	if a.busy > 0 {
+		a.busy--
+	}
+	if a.busy > 0 || a.spinStop == nil {
+		return
+	}
+	close(a.spinStop)
+	a.spinStop = nil
+	a.spinMsg = ""
+	a.setStatus("")
 }
 
 func (a *App) flash(msg string) {
@@ -303,11 +357,18 @@ func (a *App) flashErr(err error) {
 	a.setStatus(" [red]" + tview.Escape(err.Error()) + "[-]")
 }
 
-// work must not touch tview; only then runs on the UI goroutine.
+// work must not touch tview; only then runs on the UI goroutine. Whatever the caller just put in
+// the status line ("booting X...") rides along as the runner's caption.
 func (a *App) async(work func() error, then func()) {
+	msg := strings.TrimSpace(a.status.GetText(true))
+	if a.spinStop != nil {
+		msg = ""
+	}
+	a.startSpinner(msg)
 	go func() {
 		err := work()
 		a.tv.QueueUpdateDraw(func() {
+			a.stopSpinner()
 			if err != nil {
 				a.flashErr(err)
 				return
