@@ -190,7 +190,7 @@ SIMS_SCREENSHOTS=1 go test ./internal/ui -run TestGenerateScreenshots   # regene
 
 Screenshots are rendered from the same views on tcell's simulation screen with fixture devices, so they stay in step with the code.
 
-Releases are cut by tagging: `git tag v0.1.0 && git push origin v0.1.0` runs GoReleaser in GitHub Actions and publishes the archives and `checksums.txt` that `install.sh` downloads. GoReleaser releases to whichever repo runs the workflow, so a mirror that receives the tag gets its own release.
+Releases are cut by tagging: `git tag vX.Y.Z && git push origin vX.Y.Z` runs GoReleaser in GitHub Actions and publishes the archives and `checksums.txt` that `install.sh` downloads. GoReleaser releases to whichever repo runs the workflow, so a mirror that receives the tag gets its own release.
 
 ## Acknowledgements
 
