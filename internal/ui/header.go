@@ -30,7 +30,7 @@ var globalHints = []hint{
 }
 
 var navigationHints = []hint{
-	{"j", "down"}, {"k", "up"}, {"g", "top"}, {"G", "bottom"}, {"ctrl+f", "page down"}, {"ctrl+b", "page up"},
+	{"j", "down"}, {"k", "up"}, {"g", "top"}, {"shift+g", "bottom"}, {"ctrl+f", "page down"}, {"ctrl+b", "page up"},
 }
 
 const logoText = ` ___(_)_ __ ___  ___

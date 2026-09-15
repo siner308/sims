@@ -99,7 +99,7 @@ Everything in one table: `VIA` says how a device is reached (`avd` and `sim` are
   <img src="docs/img/apps.svg" alt="apps view" width="100%">
 </p>
 
-Apps you installed come first with their display name and version; preinstalled apps are hidden until you press `s`. `SOURCE` tells `adb` sideloads from `store` installs. `i` opens the OS file dialog (Finder, Explorer) to pick an `.apk` or `.app`; `I` opens the built-in file picker instead.
+Apps you installed come first with their display name and version; preinstalled apps are hidden until you press `s`. `SOURCE` tells `adb` sideloads from `store` installs. `i` opens the OS file dialog (Finder, Explorer) to pick an `.apk` or `.app`; `shift+i` opens the built-in file picker instead.
 
 ### Logs
 
@@ -139,12 +139,12 @@ Installed system images and iOS runtimes by default; `s` adds everything `sdkman
 | devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
-| devices | `shift+P` `V` `N` `M` `R` `S` `L` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
-| apps | `enter` / `i` / `I` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |
+| devices | `shift+p` `shift+v` `shift+n` `shift+m` `shift+r` `shift+s` `shift+l` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
+| apps | `enter` / `i` / `shift+i` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |
 | apps | `l` | logs of the selected app only (android: `logcat --pid`, so the app must be running; ios: `log stream --predicate`) |
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
-| logs | `/` `c` `p` `w` `g` `G` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
+| logs | `/` `c` `p` `w` `g` `shift+g` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
 | images | `n` or `enter` / `i` / `s` | new device from image / install image (android) / show downloadable images |
 
 Filtering works the same everywhere: `/` opens an empty prompt, `enter` applies the text as a case-insensitive substring match and highlights every hit in the rows (or log lines) that pass, an empty `enter` clears the filter, and `esc` leaves the current filter alone.

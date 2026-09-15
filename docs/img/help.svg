@@ -89,7 +89,7 @@
 <text x="133.6" y="245.5" textLength="67.2" lengthAdjust="spacing" fill="#808080">shutdown</text>
 <text x="352.0" y="245.5" textLength="25.2" lengthAdjust="spacing" fill="#00ffff">&lt;r&gt;</text>
 <text x="545.2" y="245.5" textLength="58.8" lengthAdjust="spacing" fill="#808080">refresh</text>
-<text x="763.6" y="245.5" textLength="25.2" lengthAdjust="spacing" fill="#00ffff">&lt;G&gt;</text>
+<text x="763.6" y="245.5" textLength="75.6" lengthAdjust="spacing" fill="#00ffff">&lt;shift+g&gt;</text>
 <text x="856.0" y="245.5" textLength="50.4" lengthAdjust="spacing" fill="#808080">bottom</text>
 <text x="1267.6" y="245.5" textLength="8.4" lengthAdjust="spacing" fill="#808080">║</text>
 <text x="16.0" y="263.5" textLength="8.4" lengthAdjust="spacing" fill="#808080">║</text>

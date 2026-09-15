@@ -46,7 +46,7 @@ func newLogsView(a *App, d device.Device, only *device.App) *logsView {
 func (v *logsView) Name() string               { return "logs" }
 func (v *logsView) Primitive() tview.Primitive { return v.text }
 func (v *logsView) Hints() []hint {
-	return []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"G", "bottom"}}
+	return []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"}}
 }
 
 func (v *logsView) Refresh() {
