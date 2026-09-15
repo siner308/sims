@@ -33,8 +33,7 @@ var navigationHints = []hint{
 	{"j", "down"}, {"k", "up"}, {"g", "top"}, {"G", "bottom"}, {"ctrl+f", "page down"}, {"ctrl+b", "page up"},
 }
 
-const logoText = `     _
- ___(_)_ __ ___  ___
+const logoText = ` ___(_)_ __ ___  ___
 / __| | '_ ' _ \/ __|
 \__ \ | | | | | \__ \
 |___/_|_| |_| |_|___/`
