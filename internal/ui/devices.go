@@ -183,9 +183,9 @@ func (v *devicesView) render() {
 	}
 	v.table.Clear()
 	headers := append([]string(nil), columnNames[:]...)
-	mark := "^"
+	mark := "\u2191" // ↑
 	if v.sort.desc {
-		mark = "v"
+		mark = "\u2193" // ↓
 	}
 	headers[v.sort.col] += mark
 	setHeader(v.table, headers...)

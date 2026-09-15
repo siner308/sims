@@ -108,7 +108,7 @@
 <text x="268.0" y="155.5" textLength="33.6" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">NAME</text>
 <text x="494.8" y="155.5" textLength="42.0" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">MODEL</text>
 <text x="671.2" y="155.5" textLength="58.8" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">RUNTIME</text>
-<text x="822.4" y="155.5" textLength="50.4" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">STATE^</text>
+<text x="822.4" y="155.5" textLength="50.4" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">STATE↑</text>
 <text x="965.2" y="155.5" textLength="33.6" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">LAST</text>
 <text x="1099.6" y="155.5" textLength="16.8" lengthAdjust="spacing" fill="#00ffff" font-weight="bold">ID</text>
 <text x="1486.0" y="155.5" textLength="8.4" lengthAdjust="spacing" fill="#808080">║</text>
