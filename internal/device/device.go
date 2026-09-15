@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"os/exec"
+	"slices"
 	"time"
 )
 
@@ -103,6 +104,7 @@ type Image struct {
 	Name      string
 	Version   string
 	Installed bool
+	Platform  string // OS the image runs ("iOS", "tvOS", "watchOS"); empty when the platform has only one
 }
 
 type Provider interface {
@@ -130,6 +132,82 @@ type DeviceType struct {
 	ID     string
 	Name   string
 	Screen string // "1080x2400" plus density or scale when the platform exposes it; empty when unknown
+	// MinRuntime and MaxRuntime bound the OS versions the type can run ("12.3.1", "15.255.255"); empty means any
+	MinRuntime string
+	MaxRuntime string
+	Family     string // product line ("iPhone", "iPad", "Apple TV", "Apple Watch"); empty when unknown
+}
+
+// familiesByPlatform lists which product lines boot which OS; simctl exposes both but does not tie them.
+var familiesByPlatform = map[string][]string{
+	"iOS":      {"iPhone", "iPad"},
+	"tvOS":     {"Apple TV"},
+	"watchOS":  {"Apple Watch"},
+	"xrOS":     {"Apple Vision"},
+	"visionOS": {"Apple Vision"},
+}
+
+// Supports reports whether a type can run the image: its OS version must fall inside the type's
+// runtime bounds and its product line must boot that OS. Unknown bounds, platform or family count as compatible.
+func (t DeviceType) Supports(img Image) bool {
+	if families, known := familiesByPlatform[img.Platform]; known && t.Family != "" && !slices.Contains(families, t.Family) {
+		return false
+	}
+	if img.Version == "" {
+		return true
+	}
+	if t.MinRuntime != "" && compareVersions(img.Version, t.MinRuntime) < 0 {
+		return false
+	}
+	if t.MaxRuntime != "" && compareVersions(img.Version, t.MaxRuntime) > 0 {
+		return false
+	}
+	return true
+}
+
+func compareVersions(a, b string) int {
+	pa, pb := versionParts(a), versionParts(b)
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var x, y int
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+func versionParts(v string) []int {
+	var out []int
+	n, has := 0, false
+	for _, r := range v {
+		switch {
+		case r >= '0' && r <= '9':
+			n, has = n*10+int(r-'0'), true
+		case r == '.':
+			if has {
+				out = append(out, n)
+			}
+			n, has = 0, false
+		default:
+			if has {
+				out = append(out, n)
+			}
+			return out
+		}
+	}
+	if has {
+		out = append(out, n)
+	}
+	return out
 }
 
 // Hardware is the part of a virtual device's configuration that a user tunes: zero values mean "leave as is".

@@ -99,3 +99,22 @@ func TestMapState(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceTypeSupports(t *testing.T) {
+	ios := func(v string) device.Image { return device.Image{Version: v, Platform: "iOS"} }
+	old := device.DeviceType{MinRuntime: "9.0", MaxRuntime: "15.255.255", Family: "iPhone"}
+	if old.Supports(ios("17.5")) || !old.Supports(ios("15.4")) || !old.Supports(ios("")) {
+		t.Error("6s-class type must reject iOS 17.5, accept 15.4 and an unknown version")
+	}
+	cur := device.DeviceType{MinRuntime: "17.0", MaxRuntime: "26.255.255", Family: "iPhone"}
+	if !cur.Supports(ios("17.5")) || !cur.Supports(ios("26.5")) || cur.Supports(ios("16.4")) {
+		t.Error("current type bounds wrong")
+	}
+	tv := device.DeviceType{MinRuntime: "9.0", MaxRuntime: "65535.255.255", Family: "Apple TV"}
+	if tv.Supports(ios("26.5")) || !tv.Supports(device.Image{Version: "26.5", Platform: "tvOS"}) {
+		t.Error("an Apple TV type must only pair with tvOS runtimes")
+	}
+	if !(device.DeviceType{}).Supports(device.Image{Version: "99"}) {
+		t.Error("no bounds means compatible")
+	}
+}

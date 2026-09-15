@@ -44,6 +44,7 @@ type simRuntime struct {
 	Identifier  string `json:"identifier"`
 	Name        string `json:"name"`
 	Version     string `json:"version"`
+	Platform    string `json:"platform"`
 	IsAvailable bool   `json:"isAvailable"`
 }
 
@@ -51,6 +52,9 @@ type simDeviceType struct {
 	Identifier string `json:"identifier"`
 	Name       string `json:"name"`
 	BundlePath string `json:"bundlePath"`
+	MinRuntime string `json:"minRuntimeVersionString"`
+	MaxRuntime string `json:"maxRuntimeVersionString"`
+	Family     string `json:"productFamily"`
 }
 
 func (p *Provider) Info(ctx context.Context) [][2]string {
@@ -255,7 +259,7 @@ func (p *Provider) Images(ctx context.Context) ([]device.Image, error) {
 	}
 	var images []device.Image
 	for _, r := range runtimes {
-		images = append(images, device.Image{ID: r.Identifier, Name: r.Name, Version: r.Version, Installed: r.IsAvailable})
+		images = append(images, device.Image{ID: r.Identifier, Name: r.Name, Version: r.Version, Installed: r.IsAvailable, Platform: r.Platform})
 	}
 	return images, nil
 }
@@ -282,7 +286,7 @@ func (p *Provider) DeviceTypes(ctx context.Context) ([]device.DeviceType, error)
 	}
 	var types []device.DeviceType
 	for _, t := range payload.DeviceTypes {
-		types = append(types, device.DeviceType{ID: t.Identifier, Name: t.Name, Screen: screenFromProfile(ctx, t.BundlePath)})
+		types = append(types, device.DeviceType{ID: t.Identifier, Name: t.Name, Screen: screenFromProfile(ctx, t.BundlePath), MinRuntime: t.MinRuntime, MaxRuntime: t.MaxRuntime, Family: t.Family})
 	}
 	return types, nil
 }
@@ -330,11 +334,18 @@ func simctl(ctx context.Context, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
-			msg = msg[i+1:]
+		// simctl create puts the error code on stderr and the offending type/runtime pair on stdout
+		var parts []string
+		for _, s := range []string{stderr.String(), string(out)} {
+			s = strings.TrimSpace(s)
+			if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+				s = s[i+1:]
+			}
+			if s != "" {
+				parts = append(parts, s)
+			}
 		}
-		return "", fmt.Errorf("simctl %s: %w: %s", strings.Join(args, " "), err, msg)
+		return "", fmt.Errorf("simctl %s: %w: %s", strings.Join(args, " "), err, strings.Join(parts, ": "))
 	}
 	return string(out), nil
 }
