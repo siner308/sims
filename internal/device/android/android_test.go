@@ -1,6 +1,8 @@
 package android_test
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/siner308/sims/internal/device"
@@ -76,4 +78,33 @@ func TestProvider_DeviceTypes(t *testing.T) {
 		}
 	}
 	t.Logf("%d device types, %d with a screen size", len(types), withScreen)
+}
+
+func TestProvider_Checks_FixesNameSDKRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ANDROID_HOME", root)
+	t.Setenv("PATH", "")
+	var checks []device.Check
+	android.New().Checks(t.Context(), func(c device.Check) { checks = append(checks, c) })
+	sdkRoot := "--sdk_root=" + root
+	seen := 0
+	for _, c := range checks {
+		if c.OK || c.Fix == "" {
+			continue
+		}
+		seen++
+		switch c.Name {
+		case "avdmanager", "sdkmanager":
+			if want := filepath.Join(root, "cmdline-tools", "latest"); !strings.Contains(c.Fix, want) || !strings.Contains(c.Fix, sdkRoot) {
+				t.Errorf("%s fix = %q, want %q and %q", c.Name, c.Fix, want, sdkRoot)
+			}
+		default:
+			if !strings.HasPrefix(c.Fix, "sdkmanager "+sdkRoot+" ") {
+				t.Errorf("%s fix = %q, want sdkmanager %s ...", c.Name, c.Fix, sdkRoot)
+			}
+		}
+	}
+	if seen < 5 {
+		t.Fatalf("only %d missing checks against an empty SDK root: %+v", seen, checks)
+	}
 }
