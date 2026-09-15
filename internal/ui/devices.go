@@ -64,7 +64,7 @@ func (v *devicesView) Primitive() tview.Primitive { return v.table }
 func (v *devicesView) Hints() []hint {
 	return []hint{
 		{"enter", "apps (boots first)"}, {"l", "logs"}, {"b", "boot"},
-		{"ctrl+k", "shutdown"}, {"ctrl+e", "erase"}, {"ctrl+d", "delete"},
+		{"ctrl+k", "shutdown"}, {"ctrl+e", "wipe data (keep device)"}, {"ctrl+d", "delete device"},
 		groupBreak,
 		{"n", "new device"}, {"/", "filter"}, {"p", "pair (ios)"},
 		{"w", "wifi: android enable / ios connect"}, {"x", "disconnect wifi"},
@@ -228,10 +228,10 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.act("shutdown", false, func(p device.Provider, d device.Device) error { return p.Shutdown(v.app.ctx, d) })
 		return nil
 	case tcell.KeyCtrlE:
-		v.act("erase", true, func(p device.Provider, d device.Device) error { return p.Erase(v.app.ctx, d) })
+		v.act("wipe data of", true, func(p device.Provider, d device.Device) error { return p.Erase(v.app.ctx, d) })
 		return nil
 	case tcell.KeyCtrlD:
-		v.act("delete", true, func(p device.Provider, d device.Device) error { return p.Delete(v.app.ctx, d) })
+		v.act("delete device", true, func(p device.Provider, d device.Device) error { return p.Delete(v.app.ctx, d) })
 		return nil
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		if d, ok := v.selected(); ok {
@@ -434,8 +434,18 @@ func (v *devicesView) act(verb string, dangerous bool, fn func(device.Provider, 
 		})
 	}
 	if dangerous {
-		v.app.confirm(fmt.Sprintf("%s %s (%s)?", verb, d.Name, d.Platform), run)
+		v.app.confirm(fmt.Sprintf("%s %s (%s)?\n\n%s", verb, d.Name, d.Platform, dangerNote(verb)), run)
 		return
 	}
 	run()
+}
+
+func dangerNote(verb string) string {
+	switch verb {
+	case "wipe data of":
+		return "Apps, accounts and settings are removed; the device itself stays and boots fresh."
+	case "delete device":
+		return "The device and its data are removed for good. Create a new one from images (n)."
+	}
+	return ""
 }

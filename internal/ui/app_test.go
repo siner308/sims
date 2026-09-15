@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
@@ -304,8 +303,8 @@ func TestApp_CommandBarUnderHeader(t *testing.T) {
 		_, y, _, _ = a.cmd.GetRect()
 		focused = a.tv.GetFocus()
 	})
-	if y != headerHeight {
-		t.Errorf("command bar y = %d, want %d (directly under the header)", y, headerHeight)
+	if y != a.header.height {
+		t.Errorf("command bar y = %d, want %d (directly under the header)", y, a.header.height)
 	}
 	if y > h/2 {
 		t.Errorf("command bar drawn in the bottom half (y=%d of %d)", y, h)
@@ -399,8 +398,8 @@ func TestHeader_Render(t *testing.T) {
 			t.Errorf("info panel missing %q in %q", want, info)
 		}
 	}
-	if lines := strings.Count(strings.TrimRight(info, "\n"), "\n") + 1; lines > headerHeight {
-		t.Errorf("info panel uses %d lines, header is %d: usage rows would be clipped", lines, headerHeight)
+	if lineCount(info) != 6 {
+		t.Errorf("info panel lines = %d, want 6", lineCount(info))
 	}
 	if !strings.Contains(h.logo.GetText(true), "v0.1") {
 		t.Error("version should be shown under the logo")
@@ -411,8 +410,8 @@ func TestHeader_Render(t *testing.T) {
 			t.Errorf("hotkeys missing %q in %q", want, keys)
 		}
 	}
-	if lines := strings.Count(strings.TrimRight(keys, "\n"), "\n") + 1; lines > headerHeight {
-		t.Errorf("hotkeys use %d lines, header is %d", lines, headerHeight)
+	if h.height < lineCount(keys) || h.height < lineCount(info) {
+		t.Errorf("header height %d smaller than its content (%d key lines, %d info lines)", h.height, lineCount(keys), lineCount(info))
 	}
 	raw := h.info.GetText(false)
 	if !strings.Contains(raw, "[red]91%") || !strings.Contains(raw, "[yellow]75%") {
@@ -423,32 +422,33 @@ func TestHeader_Render(t *testing.T) {
 	}
 }
 
-func TestRenderHints_Columns(t *testing.T) {
-	hints := make([]hint, 0, 7)
-	for i := range 7 {
-		hints = append(hints, hint{key: string(rune('a' + i)), label: fmt.Sprintf("label%d", i)})
-	}
-	out := renderHints(hints, 3)
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("got %d rows, want 3: %q", len(lines), out)
-	}
-	if !strings.Contains(lines[0], "<a>") || !strings.Contains(lines[0], "<d>") || !strings.Contains(lines[0], "<g>") {
-		t.Errorf("first row should hold column heads a, d, g: %q", lines[0])
-	}
-}
-
-func TestRenderHints_GroupsStartNewColumns(t *testing.T) {
+func TestRenderHints_GroupsAreColumns(t *testing.T) {
 	hints := []hint{{"a", "1"}, {"b", "2"}, groupBreak, {"c", "3"}, groupBreak, {"d", "4"}, {"e", "5"}, {"f", "6"}, {"g", "7"}}
-	lines := strings.Split(strings.TrimRight(renderHints(hints, 3), "\n"), "\n")
-	// row 0 holds the first key of every column: a | c | d | g (d..f fill one column, g spills to the next)
-	for _, k := range []string{"<a>", "<c>", "<d>", "<g>"} {
+	lines := strings.Split(strings.TrimRight(renderHints(hints), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("rows = %d, want 4 (tallest group)", len(lines))
+	}
+	for _, k := range []string{"<a>", "<c>", "<d>"} {
 		if !strings.Contains(lines[0], k) {
 			t.Errorf("row 0 missing %s: %q", k, lines[0])
 		}
 	}
-	if strings.Contains(lines[2], "<c>") || strings.Contains(lines[0], "<b>") {
-		t.Errorf("group members leaked across columns: %q / %q", lines[0], lines[2])
+	if !strings.Contains(lines[3], "<g>") || strings.Contains(lines[1], "<c>") {
+		t.Errorf("groups must stay in their own column: %q / %q", lines[1], lines[3])
+	}
+}
+
+func TestHeader_GrowsWithHints(t *testing.T) {
+	h := newHeader("v")
+	many := make([]hint, 0, 9)
+	for i := range 9 {
+		many = append(many, hint{key: string(rune('a' + i)), label: "x"})
+	}
+	if got := h.draw(many); got != 9 {
+		t.Errorf("height = %d, want 9 for a nine-key group", got)
+	}
+	if got := h.draw([]hint{{"a", "x"}}); got != minHeaderHeight {
+		t.Errorf("height = %d, want the %d-line minimum", got, minHeaderHeight)
 	}
 }
 

@@ -75,7 +75,7 @@ func (a *App) build() {
 	a.cmd.SetDoneFunc(a.onCommand)
 
 	a.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.header.flex, headerHeight, 0, false).
+		AddItem(a.header.flex, minHeaderHeight, 0, false).
 		AddItem(a.body, 0, 1, true).
 		AddItem(a.status, 1, 0, false)
 	a.cmd.SetBorder(true).SetBorderColor(tcell.ColorAqua)
@@ -128,7 +128,8 @@ func (a *App) replaceTop(v view) {
 }
 
 func (a *App) drawHeader() {
-	a.header.draw(a.top().Hints())
+	height := a.header.draw(a.top().Hints())
+	a.root.ResizeItem(a.header.flex, height, 0)
 }
 
 func (a *App) crumbs() string {
@@ -175,7 +176,7 @@ func (a *App) openCommand() {
 	a.cmd.SetText("")
 	a.root.RemoveItem(a.cmd)
 	a.root.Clear()
-	a.root.AddItem(a.header.flex, headerHeight, 0, false).
+	a.root.AddItem(a.header.flex, a.header.height, 0, false).
 		AddItem(a.cmd, 3, 0, true).
 		AddItem(a.body, 0, 1, false).
 		AddItem(a.status, 1, 0, false)
@@ -184,7 +185,7 @@ func (a *App) openCommand() {
 
 func (a *App) closeCommand() {
 	a.root.Clear()
-	a.root.AddItem(a.header.flex, headerHeight, 0, false).
+	a.root.AddItem(a.header.flex, a.header.height, 0, false).
 		AddItem(a.body, 0, 1, true).
 		AddItem(a.status, 1, 0, false)
 	a.tv.SetFocus(a.top().Primitive())

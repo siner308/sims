@@ -61,7 +61,7 @@ Either platform is enough; the header shows what was found.
 | global | `?` / `esc` / `ctrl+c` | help / back / quit |
 | global | `r` | refresh |
 | devices | `b` | boot |
-| devices | `ctrl+k` `ctrl+e` `ctrl+d` | shutdown, erase (wipe data), delete |
+| devices | `ctrl+k` `ctrl+e` `ctrl+d` | shutdown; wipe data (factory reset, the device stays); delete the device itself |
 | devices | `a` or `enter` / `l` | apps / log stream of the selected device. On a stopped virtual device `enter` asks to boot it first and opens apps once it is up |
 | devices | `n` | new device (opens images) |
 | devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
@@ -74,7 +74,7 @@ Either platform is enough; the header shows what was found.
 | logs | `/` `c` `p` `g` `G` | filter, clear, pause, top, bottom |
 | images | `n` or `enter` / `i` | new device from image / install image (android) |
 
-Anything that stops or removes something (shutdown, erase, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; erase, delete and uninstall also ask for confirmation. `ctrl+s` was avoided because terminals with XON/XOFF flow control on may swallow it before it reaches sims.
+Anything that stops or removes something (shutdown, wipe, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; wipe, delete and uninstall also ask for confirmation, and the prompt spells out what is lost. `ctrl+s` was avoided because terminals with XON/XOFF flow control on may swallow it before it reaches sims.
 
 ## Keyboard and nav keys on Android emulators
 
