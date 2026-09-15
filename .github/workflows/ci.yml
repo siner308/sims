@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: gofmt -l . | tee /dev/stderr | test -z "$(cat)"
+      - run: go vet ./...
+      - run: go test ./... -race
+      - run: GOOS=windows go build ./cmd/sims
+      - run: GOOS=darwin GOARCH=arm64 go build ./cmd/sims
