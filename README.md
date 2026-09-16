@@ -4,7 +4,7 @@
 
 <h1 align="center">sims</h1>
 
-<p align="center">Android emulators, iOS simulators and real phones, in one k9s-style terminal UI.</p>
+<p align="center">Android emulators, iOS simulators and real phones, in one k9s-style terminal UI and one command line.</p>
 
 <p align="center">
   <a href="https://github.com/siner308/sims/actions/workflows/ci.yml"><img src="https://github.com/siner308/sims/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
@@ -22,6 +22,8 @@
 ## Why
 
 Android Studio and Xcode both ship a device manager, and both take a while to open when all you want is "boot that emulator and put this APK on it". The command line tools underneath are scattered across two SDKs with different argument styles. sims puts them on one screen with the same keys for both platforms, and adds what the GUI managers leave out: which phones are reachable right now, how they are connected, and when each device was last used.
+
+The same operations are subcommands, so a script or a CI job addresses a device by name and never learns which tool sits underneath: `sims device boot Pixel_7 --wait`, `sims app install Pixel_7 app.apk`, `sims device list --json`. See [Command line](#command-line).
 
 ## Install
 
@@ -52,7 +54,7 @@ go install github.com/siner308/sims/cmd/sims@latest
 
 ### Updating
 
-`sims update` downloads the latest release for this machine, verifies it against `checksums.txt` and replaces the running binary in place (`sims update --check` only reports). On start, sims looks up the latest release in the background and, when it is newer, shows it under the logo and offers `:update` from the command bar; set `SIMS_NO_UPDATE_CHECK=1` to skip that lookup. The check reads the `releases/latest` redirect, so it does not touch the rate-limited API.
+`sims update` downloads the latest release for this machine, verifies it against `checksums.txt` and replaces the running binary in place (`sims update --check` only reports). When the TUI starts, sims looks up the latest release in the background and, when it is newer, shows it under the logo and offers `:update` from the command bar; set `SIMS_NO_UPDATE_CHECK=1` to skip that lookup. The subcommands never look, so a script pays nothing for it. The check reads the `releases/latest` redirect, so it does not touch the rate-limited API.
 
 A sims older than v0.1.2 has no `update` command; run the install line above again and it overwrites the binary in place (`SIMS_INSTALL_DIR` if it went somewhere other than the default). `go install github.com/siner308/sims/cmd/sims@latest` does the same for a `go install` build.
 
@@ -133,6 +135,54 @@ Installed system images and iOS runtimes by default; `s` adds everything `sdkman
 
 `?` lists every key for the current view, plus commands and navigation.
 
+## Command line
+
+A bare `sims` opens the TUI; anything else is a command over the same layer the TUI uses, so the two never disagree about what a device is or how to reach it. Two flags work everywhere: `--json` prints the record instead of a table or a confirmation line (a device after `boot --wait` is the booted record, serial included; `connect` and `pair` by address print the address; `doctor`, `update` and the log streams ignore it), and `--platform android|ios` (`-p`) narrows a listing or a lookup to one platform. `device` is also `devices` or `dev`, `app` is `apps`, `image` is `images` or `img`, `device-type` is `types`, and every `list` is also `ls`. `sims completion zsh|bash|fish|powershell` prints a completion script.
+
+A device is addressed by id (AVD name, simulator UDID), adb serial, or name, case-insensitive. An exact id wins over a serial, a serial over a name, and two devices sharing the winning match is an error that lists both, so pass the id.
+
+```sh
+sims device list [--all] [--json]           # --all includes simulators that were never booted
+sims device get <device>
+sims device boot <device> [--wait] [--timeout 3m]
+sims device wait <device> [--timeout 3m]    # until it reports Booted or Connected
+sims device shutdown | erase | delete <device>   # delete on a phone forgets it: ios unpairs, android drops the wifi connection
+sims device create <name> --image <image> [--type <type>] [--ram MB --cores N --disk GB] [--boot] [--timeout 3m]
+sims device hardware <device> [--ram MB --cores N --disk GB]   # AVD only; no flags prints the current values
+sims device key <device> home|back|overview # android only; a simulator takes keys in its own window
+sims device logs <device> [--app <bundle>]
+sims device connect <device>                # iPhone: open the wifi tunnel; USB Android phone: switch to adb over wifi
+sims device connect <host:port>             # adb connect
+sims device pair <device>                   # iPhone: devicectl manage pair (accept the prompt on the phone)
+sims device pair <host:port> <code>         # Android 11+ wireless debugging
+sims device disconnect <device>             # adb disconnect
+
+sims app list <device> [--all]              # --all includes preinstalled apps
+sims app install <device> <path>            # .apk or .app
+sims app uninstall | launch <device> <bundle>
+sims app logs <device> <bundle>             # android: the app must be running (logcat --pid)
+
+sims image list [--all]                     # --all includes what sdkmanager can still download
+sims image install <image>                  # android; iOS runtimes come from xcodebuild -downloadPlatform iOS
+sims device-type list [--image <image>]     # --image keeps only the types that can run it
+
+sims doctor
+sims update [--check]
+```
+
+`--image` and `--type` take an id or a name from the matching `list`, and the image must be installed (`sims image install` for Android). Without `--type`, Android takes `pixel_7` and iOS takes `iPhone 17 Pro`; when the SDK has neither, the first iPhone simctl lists (its newest), else the first type that can run the image. `--ram`, `--cores` and `--disk` are refused on iOS. `connect` and `pair` by address give adb 20 seconds, because `adb connect` blocks for over a minute on an unreachable host.
+
+Exit status is 0 on success and 1 on any failure, with the reason on stderr; an argument or flag mistake adds a `--help` hint, a device that is not found does not. A listing whose one platform failed still prints the other and reports the failure on stderr, so a broken adb does not hide the simulators. Nothing asks for confirmation: `erase`, `delete` and `uninstall` act at once, the way `adb` and `simctl` do, and the TUI keeps its ctrl chords and prompts.
+
+A script that boots an emulator, installs a build, launches it and follows its log:
+
+```sh
+sims device boot Pixel_7 --wait
+sims app install Pixel_7 app/build/outputs/apk/debug/app-debug.apk
+sims app launch Pixel_7 com.example.app
+sims app logs Pixel_7 com.example.app
+```
+
 ## Keys
 
 | Scope | Key | Action |
@@ -205,6 +255,8 @@ SIMS_SCREENSHOTS=1 go test ./internal/ui -run TestGenerateScreenshots   # regene
 ```
 
 Screenshots are rendered from the same views on tcell's simulation screen with fixture devices, so they stay in step with the code.
+
+The code is three layers. `internal/device` holds the `Provider` interface and the android and ios implementations that shell out to the SDK tools. `internal/sims` is the layer both front ends use: it merges the providers, resolves a device reference, and turns optional provider abilities (wireless adb, hardware edits, pairing) into methods that fail with `errors.ErrUnsupported` on the other platform. `internal/cli` (cobra) and `internal/ui` (tview) sit on top and never import each other, so the CLI can become its own binary by adding a `main` that leaves `RunTUI` unset. `internal/device/devicetest` has in-memory providers for testing the two upper layers.
 
 Releases are cut by tagging: `git tag vX.Y.Z && git push origin vX.Y.Z` runs GoReleaser in GitHub Actions and publishes the archives and `checksums.txt` that `install.sh` downloads. GoReleaser releases to whichever repo runs the workflow, so a mirror that receives the tag gets its own release.
 
