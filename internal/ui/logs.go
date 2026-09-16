@@ -51,14 +51,9 @@ func (v *logsView) Hints() []hint {
 
 func (v *logsView) Refresh() {
 	v.stop()
-	p, err := v.app.providerFor(v.dev)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
 	ctx, cancel := context.WithCancel(v.app.ctx)
 	v.cancel = cancel
-	cmd, err := p.LogCmd(ctx, v.dev, v.only)
+	cmd, err := v.app.m.LogCmd(ctx, v.dev, v.only)
 	if err != nil {
 		v.app.flashErr(err)
 		return

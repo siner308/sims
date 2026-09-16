@@ -13,6 +13,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 )
 
 // Lives in the test package because the views it renders are unexported; skipped unless SIMS_SCREENSHOTS=1.
@@ -41,7 +42,7 @@ func TestGenerateScreenshots(t *testing.T) {
 	}}}
 
 	shoot := func(name string, width, height int, setup func(a *App)) {
-		a := New("v0.1.0", android, ios)
+		a := New("v0.1.0", sims.New(android, ios))
 		a.header.facts = [][2]string{
 			{"Platforms", "android, ios"},
 			{"Android SDK", "~/Library/Android/sdk"},
@@ -119,14 +120,14 @@ func TestGenerateScreenshots(t *testing.T) {
 	})
 	shoot("images", 150, 22, func(a *App) {
 		iv := newImagesView(a)
-		iv.rows = []imageRow{
-			{platform: device.PlatformAndroid, image: device.Image{ID: "system-images;android-36;google_apis_playstore;arm64-v8a", Name: "google_apis_playstore arm64-v8a", Version: "36", Installed: true}},
-			{platform: device.PlatformAndroid, image: device.Image{ID: "system-images;android-35;google_apis_playstore;arm64-v8a", Name: "google_apis_playstore arm64-v8a", Version: "35", Installed: true}},
-			{platform: device.PlatformIOS, image: device.Image{ID: "com.apple.CoreSimulator.SimRuntime.iOS-26-5", Name: "iOS 26.5", Version: "26.5", Installed: true}},
-			{platform: device.PlatformIOS, image: device.Image{ID: "com.apple.CoreSimulator.SimRuntime.iOS-18-5", Name: "iOS 18.5", Version: "18.5", Installed: true}},
-			{platform: device.PlatformAndroid, image: device.Image{ID: "system-images;android-36;google_apis;arm64-v8a", Name: "google_apis arm64-v8a", Version: "36", Installed: false}},
-			{platform: device.PlatformAndroid, image: device.Image{ID: "system-images;android-35;google_apis;arm64-v8a", Name: "google_apis arm64-v8a", Version: "35", Installed: false}},
-			{platform: device.PlatformAndroid, image: device.Image{ID: "system-images;android-34;google_apis_playstore;arm64-v8a", Name: "google_apis_playstore arm64-v8a", Version: "34", Installed: false}},
+		iv.rows = []sims.PlatformImage{
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "system-images;android-36;google_apis_playstore;arm64-v8a", Name: "google_apis_playstore arm64-v8a", Version: "36", Installed: true}},
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "system-images;android-35;google_apis_playstore;arm64-v8a", Name: "google_apis_playstore arm64-v8a", Version: "35", Installed: true}},
+			{Platform: device.PlatformIOS, Image: device.Image{ID: "com.apple.CoreSimulator.SimRuntime.iOS-26-5", Name: "iOS 26.5", Version: "26.5", Installed: true}},
+			{Platform: device.PlatformIOS, Image: device.Image{ID: "com.apple.CoreSimulator.SimRuntime.iOS-18-5", Name: "iOS 18.5", Version: "18.5", Installed: true}},
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "system-images;android-36;google_apis;arm64-v8a", Name: "google_apis arm64-v8a", Version: "36", Installed: false}},
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "system-images;android-35;google_apis;arm64-v8a", Name: "google_apis arm64-v8a", Version: "35", Installed: false}},
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "system-images;android-34;google_apis_playstore;arm64-v8a", Name: "google_apis_playstore arm64-v8a", Version: "34", Installed: false}},
 		}
 		a.stack = append(a.stack, iv)
 		a.body.AddAndSwitchToPage(iv.Name(), iv.Primitive(), true)

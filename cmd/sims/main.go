@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"runtime/debug"
 
+	"github.com/siner308/sims/internal/cli"
 	"github.com/siner308/sims/internal/device/android"
 	"github.com/siner308/sims/internal/device/ios"
-	"github.com/siner308/sims/internal/doctor"
+	"github.com/siner308/sims/internal/sims"
 	"github.com/siner308/sims/internal/ui"
 	"github.com/siner308/sims/internal/update"
 )
@@ -28,30 +30,22 @@ func resolveVersion() string {
 
 func main() {
 	v := resolveVersion()
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "-v", "--version":
-			fmt.Println("sims", v)
-			return
-		case "doctor":
-			fmt.Println("sims", v)
-			if !doctor.Run(context.Background(), os.Stdout, android.New(), ios.New()) {
-				os.Exit(1)
-			}
-			return
-		case "update":
-			checkOnly := len(os.Args) > 2 && os.Args[2] == "--check"
-			if err := update.Run(context.Background(), v, checkOnly, os.Stdout); err != nil {
-				fmt.Fprintln(os.Stderr, "sims update:", err)
-				os.Exit(1)
-			}
-			return
-		case "-h", "--help", "help":
-			fmt.Println("usage: sims            start the TUI\n       sims doctor     check adb, emulator, avdmanager, sdkmanager, aapt2, xcrun simctl/devicectl, idevicesyslog\n       sims update     replace this binary with the latest release (--check only reports)\n       sims --version")
-			return
-		}
-	}
-	app := ui.New(v, android.New(), ios.New())
+	m := sims.New(android.New(), ios.New())
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	code := cli.Execute(ctx, cli.Options{
+		Version: v,
+		Manager: m,
+		RunTUI:  func(context.Context) error { return runTUI(v, m) },
+		Update: func(ctx context.Context, checkOnly bool, w io.Writer) error {
+			return update.Run(ctx, v, checkOnly, w)
+		},
+	})
+	stop()
+	os.Exit(code)
+}
+
+func runTUI(v string, m *sims.Manager) error {
+	app := ui.New(v, m)
 	if os.Getenv("SIMS_NO_UPDATE_CHECK") == "" {
 		u := update.New()
 		app.CheckUpdates(u.Latest, func(ctx context.Context, tag string) error {
@@ -62,8 +56,5 @@ func main() {
 			return u.Apply(ctx, tag, target)
 		})
 	}
-	if err := app.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return app.Run()
 }

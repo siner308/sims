@@ -10,6 +10,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 	"github.com/siner308/sims/internal/update"
 )
 
@@ -27,8 +28,7 @@ type App struct {
 	status      *tview.TextView
 	cmd         *tview.InputField
 	body        *tview.Pages
-	providers   map[device.Platform]device.Provider
-	missing     map[device.Platform]error
+	m           *sims.Manager
 	stack       []view
 	statusRows  int
 	busy        int // async jobs in flight; the runner shows while it is above zero
@@ -44,22 +44,14 @@ type App struct {
 	applyUpdate func(ctx context.Context, tag string) error
 }
 
-func New(version string, providers ...device.Provider) *App {
+func New(version string, m *sims.Manager) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
-		tv:        tview.NewApplication(),
-		providers: map[device.Platform]device.Provider{},
-		missing:   map[device.Platform]error{},
-		ctx:       ctx,
-		cancel:    cancel,
-		version:   version,
-	}
-	for _, p := range providers {
-		if err := p.Available(); err != nil {
-			a.missing[p.Platform()] = err
-			continue
-		}
-		a.providers[p.Platform()] = p
+		tv:      tview.NewApplication(),
+		m:       m,
+		ctx:     ctx,
+		cancel:  cancel,
+		version: version,
 	}
 	a.build()
 	return a
@@ -94,7 +86,7 @@ func (a *App) build() {
 	a.tv.SetRoot(a.root, true).EnableMouse(false)
 	a.tv.SetInputCapture(a.onKey)
 	a.push(newDevicesView(a))
-	a.header.loadFacts(a.ctx, a.providers, a.missing, func(facts [][2]string) {
+	a.header.loadFacts(a.ctx, a.m, func(facts [][2]string) {
 		a.tv.QueueUpdateDraw(func() { a.header.facts = facts; a.drawHeader() })
 	})
 	go pollUsage(a.ctx, 3*time.Second, func(u usage) {
@@ -286,11 +278,6 @@ func (a *App) onCommand(key tcell.Key) {
 
 // adb connect blocks for over a minute on an unreachable host, so the command gets its own deadline.
 func (a *App) wirelessCommand(fields []string) {
-	w, ok := a.providers[device.PlatformAndroid].(device.Wireless)
-	if !ok {
-		a.flash("android provider is not available")
-		return
-	}
 	verb, addr := fields[0], fields[1]
 	code := ""
 	if len(fields) > 2 {
@@ -301,9 +288,9 @@ func (a *App) wirelessCommand(fields []string) {
 		ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 		defer cancel()
 		if verb == "pair" {
-			return w.Pair(ctx, addr, code)
+			return a.m.PairAddress(ctx, "", addr, code)
 		}
-		return w.Connect(ctx, addr)
+		return a.m.ConnectAddress(ctx, "", addr)
 	}, func() {
 		a.flash(fmt.Sprintf("%s %s: ok", verb, addr))
 		a.stack[0].Refresh()
@@ -505,25 +492,7 @@ func (a *App) promptPath(label, initial string, onDone func(string)) {
 }
 
 func (a *App) sendKey(d device.Device, key device.Key) {
-	p, err := a.providerFor(d)
-	if err != nil {
-		a.flashErr(err)
-		return
-	}
-	ks, ok := p.(device.KeySender)
-	if !ok {
-		a.flashErr(fmt.Errorf("%s cannot send %s from here; use the simulator window", d.Platform, key))
-		return
-	}
-	a.async(func() error { return ks.SendKey(a.ctx, d, key) }, func() { a.flash(string(key) + " sent to " + d.Name) })
-}
-
-func (a *App) providerFor(d device.Device) (device.Provider, error) {
-	p, ok := a.providers[d.Platform]
-	if !ok {
-		return nil, fmt.Errorf("no provider for %s", d.Platform)
-	}
-	return p, nil
+	a.async(func() error { return a.m.SendKey(a.ctx, d, key) }, func() { a.flash(string(key) + " sent to " + d.Name) })
 }
 
 // Only the focused button is painted (dodger blue, black bold); idle ones are plain dim text, so one

@@ -3,14 +3,15 @@ package ui
 import (
 	"context"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
-	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 )
 
 const minHeaderHeight = 6
@@ -85,31 +86,29 @@ func (h *header) setUpdate(tag string) {
 
 // loadFacts gathers tool facts off the UI goroutine and hands them to onDone; the caller stores them
 // on the UI goroutine, because draw reads h.facts there on every usage tick.
-func (h *header) loadFacts(ctx context.Context, providers map[device.Platform]device.Provider, missing map[device.Platform]error, onDone func(facts [][2]string)) {
-	platforms := make([]string, 0, len(providers))
-	for p := range providers {
-		platforms = append(platforms, string(p))
+func (h *header) loadFacts(ctx context.Context, m *sims.Manager, onDone func(facts [][2]string)) {
+	platforms := m.Platforms()
+	names := make([]string, len(platforms))
+	for i, p := range platforms {
+		names[i] = string(p)
 	}
-	sort.Strings(platforms)
-	base := [][2]string{{"Platforms", strings.Join(platforms, ", ")}}
-	for p, err := range missing {
-		base = append(base, [2]string{string(p), "[gray]" + tview.Escape(err.Error()) + "[-]"})
+	base := [][2]string{{"Platforms", strings.Join(names, ", ")}}
+	for _, p := range slices.Sorted(maps.Keys(m.Missing())) {
+		base = append(base, [2]string{string(p), "[gray]" + tview.Escape(m.Missing()[p].Error()) + "[-]"})
 	}
 	go func() {
 		facts := base
 		var tools []string
-		for _, name := range platforms {
-			if d, ok := providers[device.Platform(name)].(device.Describer); ok {
-				fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				for _, f := range d.Info(fctx) {
-					if f[0] == "Android SDK" {
-						facts = append(facts, [2]string{f[0], shortenHome(f[1])})
-						continue
-					}
-					tools = append(tools, f[0]+" "+f[1])
+		for _, p := range platforms {
+			fctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			for _, f := range m.Info(fctx, p) {
+				if f[0] == "Android SDK" {
+					facts = append(facts, [2]string{f[0], shortenHome(f[1])})
+					continue
 				}
-				cancel()
+				tools = append(tools, f[0]+" "+f[1])
 			}
+			cancel()
 		}
 		if len(tools) > 0 {
 			facts = append(facts, [2]string{"Tools", strings.Join(tools, ", ")})

@@ -15,6 +15,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 )
 
 type fakeProvider struct {
@@ -102,7 +103,7 @@ func TestApp_DevicesRender(t *testing.T) {
 	ios := &fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
 		{ID: "udid1", Name: "iPhone 17", Platform: device.PlatformIOS, Kind: device.KindVirtual, Transport: device.TransportSim, Runtime: "iOS 26.4", State: device.StateShutdown, LastActiveAt: time.Now().Add(-time.Hour)},
 	}}
-	a := New("test", android, ios)
+	a := New("test", sims.New(android, ios))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -120,7 +121,7 @@ func TestApp_AppsSystemToggle(t *testing.T) {
 	android := &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, Transport: device.TransportAVD, State: device.StateBooted, Serial: "emulator-5554"},
 	}}
-	a := New("test", android)
+	a := New("test", sims.New(android))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -156,7 +157,7 @@ func TestApp_PlainKeysAreNotDestructive(t *testing.T) {
 	android := &countingProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, Transport: device.TransportAVD, State: device.StateBooted, Serial: "emulator-5554"},
 	}}, onShutdown: func() { shutdowns.Add(1) }}
-	a := New("test", android)
+	a := New("test", sims.New(android))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -189,9 +190,9 @@ func (c *countingProvider) Shutdown(context.Context, device.Device) error {
 }
 
 func TestApp_TransparentBackground(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, Transport: device.TransportAVD, State: device.StateShutdown},
-	}})
+	}}))
 	screen, stop := runHeadless(t, a)
 	defer stop()
 
@@ -296,7 +297,7 @@ func TestDevicesView_Sort(t *testing.T) {
 }
 
 func TestApp_CommandBarUnderHeader(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	screen, stop := runHeadless(t, a)
 	defer stop()
 
@@ -326,7 +327,7 @@ func TestApp_CommandBarUnderHeader(t *testing.T) {
 }
 
 func TestApp_PlainQDoesNotQuit(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -342,13 +343,13 @@ func TestApp_PlainQDoesNotQuit(t *testing.T) {
 }
 
 func TestCreateView_ArrowNavigation(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
 	var cv *createView
 	a.tv.QueueUpdate(func() {
-		cv = newCreateView(a, a.providers[device.PlatformAndroid], device.Image{ID: "img", Name: "img", Version: "1"}, []device.DeviceType{{ID: "pixel_7", Name: "pixel_7", Screen: "1080x2400"}, {ID: "pixel_8", Name: "pixel_8"}})
+		cv = newCreateView(a, sims.PlatformImage{Image: device.Image{ID: "img", Name: "img", Version: "1"}, Platform: device.PlatformAndroid}, []device.DeviceType{{ID: "pixel_7", Name: "pixel_7", Screen: "1080x2400"}, {ID: "pixel_8", Name: "pixel_8"}})
 		a.push(cv)
 	})
 	press := func(k tcell.Key) {
@@ -462,7 +463,7 @@ func TestHeader_GrowsWithHints(t *testing.T) {
 
 func TestDevicesHints_NoDuplicates(t *testing.T) {
 	seen := map[string]bool{}
-	for _, h := range newDevicesView(New("t")).Hints() {
+	for _, h := range newDevicesView(New("t", sims.New())).Hints() {
 		if h.isBreak() {
 			continue
 		}
@@ -507,7 +508,7 @@ func TestDevicesView_SendsNavigationKeys(t *testing.T) {
 	kp := &keyProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateBooted, Serial: "emulator-5554"},
 	}}}
-	a := New("test", kp)
+	a := New("test", sims.New(kp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -530,9 +531,9 @@ func TestDevicesView_SendsNavigationKeys(t *testing.T) {
 }
 
 func TestDevicesView_PairKeyIsWired(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "x", Name: "phone", Platform: device.PlatformAndroid, Kind: device.KindPhysical, State: device.StateConnected, Serial: "x"},
-	}})
+	}}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -583,7 +584,7 @@ func TestDevicesView_EnterOnStoppedDeviceBootsThenOpensApps(t *testing.T) {
 	bp := &bootProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, Transport: device.TransportAVD, State: device.StateShutdown},
 	}}}
-	a := New("test", bp)
+	a := New("test", sims.New(bp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -619,9 +620,9 @@ func TestDevicesView_EnterOnStoppedDeviceBootsThenOpensApps(t *testing.T) {
 }
 
 func TestDevicesView_EnterOnOfflinePhoneFlashesError(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "R3C", Name: "phone", Platform: device.PlatformAndroid, Kind: device.KindPhysical, Transport: device.TransportUSB, State: device.StateOffline},
-	}})
+	}}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -655,7 +656,7 @@ func TestDevicesView_WOnIOSPhoneConnects(t *testing.T) {
 	cp := &connectProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
 		{ID: "BBBB", Name: "my iphone", Platform: device.PlatformIOS, Kind: device.KindPhysical, Transport: device.TransportWiFi, State: device.StateOffline},
 	}}}
-	a := New("test", cp)
+	a := New("test", sims.New(cp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -690,7 +691,7 @@ func TestRenderHints_DropsWholeColumnsThatDoNotFit(t *testing.T) {
 }
 
 func TestLogsView_WrapToggle(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	var title string
@@ -709,7 +710,7 @@ func TestDevicesView_RefreshesWhileShuttingDown(t *testing.T) {
 	bp := &bootProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
 		{ID: "u1", Name: "iPhone", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShuttingDown},
 	}}}
-	a := New("test", bp)
+	a := New("test", sims.New(bp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -721,10 +722,10 @@ func TestDevicesView_RefreshesWhileShuttingDown(t *testing.T) {
 }
 
 func TestPrompt_EmptyEnterClearsFilter(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "a", Name: "alpha", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
 		{ID: "b", Name: "beta", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
-	}})
+	}}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -774,7 +775,7 @@ func TestDevicesView_RefreshKeepsSelectedDeviceNotRow(t *testing.T) {
 		{ID: "b", Name: "b", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
 		{ID: "c", Name: "c", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
 	}}}
-	a := New("t", bp)
+	a := New("t", sims.New(bp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -819,7 +820,7 @@ func TestDevicesView_EditHardware(t *testing.T) {
 	hp := &hwProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
 	}}}
-	a := New("t", hp)
+	a := New("t", sims.New(hp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -844,12 +845,12 @@ func TestDevicesView_EditHardware(t *testing.T) {
 }
 
 func TestCreateView_HardwareFieldsOnlyForEditors(t *testing.T) {
-	plain := New("t", &fakeProvider{platform: device.PlatformIOS})
+	plain := New("t", sims.New(&fakeProvider{platform: device.PlatformIOS}))
 	_, stopPlain := runHeadless(t, plain)
 	defer stopPlain()
 	var items int
 	onUI(plain, func() {
-		cv := newCreateView(plain, plain.providers[device.PlatformIOS], device.Image{Name: "iOS 26.5"}, []device.DeviceType{{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", Name: "iPhone 17 Pro", Screen: "1206x2622 @3x"}})
+		cv := newCreateView(plain, sims.PlatformImage{Image: device.Image{Name: "iOS 26.5"}, Platform: device.PlatformIOS}, []device.DeviceType{{ID: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", Name: "iPhone 17 Pro", Screen: "1206x2622 @3x"}})
 		items = cv.form.GetFormItemCount()
 		label := cv.form.GetFormItem(1).(*tview.InputField).GetText()
 		if !strings.Contains(label, "iPhone 17 Pro (iPhone-17-Pro)") || !strings.Contains(label, "1206x2622 @3x") {
@@ -860,11 +861,11 @@ func TestCreateView_HardwareFieldsOnlyForEditors(t *testing.T) {
 		t.Errorf("ios form items = %d, want 2 (no hardware fields)", items)
 	}
 
-	hw := New("t", &hwProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid}})
+	hw := New("t", sims.New(&hwProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid}}))
 	_, stopHW := runHeadless(t, hw)
 	defer stopHW()
 	onUI(hw, func() {
-		cv := newCreateView(hw, hw.providers[device.PlatformAndroid], device.Image{Name: "img"}, nil)
+		cv := newCreateView(hw, sims.PlatformImage{Image: device.Image{Name: "img"}, Platform: device.PlatformAndroid}, nil)
 		items = cv.form.GetFormItemCount()
 	})
 	if items != 5 {
@@ -936,12 +937,12 @@ func TestDeviceTypeFilterAndResolve(t *testing.T) {
 
 func TestDevicesView_HidesNeverUsedSimulators(t *testing.T) {
 	now := time.Now()
-	a := New("t", &fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
+	a := New("t", sims.New(&fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
 		{ID: "used", Name: "iPhone 17 Pro", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShutdown, LastActiveAt: now.Add(-time.Hour)},
 		{ID: "fresh1", Name: "iPhone 16", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShutdown},
 		{ID: "fresh2", Name: "iPad mini", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateShutdown},
 		{ID: "phone", Name: "my iPhone", Platform: device.PlatformIOS, Kind: device.KindPhysical, State: device.StateOffline},
-	}})
+	}}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -962,17 +963,17 @@ func TestDevicesView_HidesNeverUsedSimulators(t *testing.T) {
 }
 
 func TestImagesView_InstalledOnlyByDefault(t *testing.T) {
-	a := New("t", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("t", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	var rows int
 	var title string
 	onUI(a, func() {
 		iv := newImagesView(a)
-		iv.rows = []imageRow{
-			{platform: device.PlatformAndroid, image: device.Image{ID: "a", Name: "a", Version: "36", Installed: true}},
-			{platform: device.PlatformAndroid, image: device.Image{ID: "b", Name: "b", Version: "35"}},
-			{platform: device.PlatformAndroid, image: device.Image{ID: "c", Name: "c", Version: "34"}},
+		iv.rows = []sims.PlatformImage{
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "a", Name: "a", Version: "36", Installed: true}},
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "b", Name: "b", Version: "35"}},
+			{Platform: device.PlatformAndroid, Image: device.Image{ID: "c", Name: "c", Version: "34"}},
 		}
 		iv.render()
 		rows, title = iv.table.GetRowCount(), iv.table.GetTitle()
@@ -987,7 +988,7 @@ func TestImagesView_InstalledOnlyByDefault(t *testing.T) {
 }
 
 func TestLogsView_RedrawKeepsScrollPosition(t *testing.T) {
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	screen, stop := runHeadless(t, a)
 	defer stop()
 	var lv *logsView
@@ -1045,7 +1046,7 @@ func TestDangerNote_PhysicalDelete(t *testing.T) {
 }
 
 func TestStatus_LongErrorWraps(t *testing.T) {
-	a := New("t", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("t", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	screen, stop := runHeadless(t, a)
 	defer stop()
 	onUI(a, func() { screen.SetSize(80, 30); a.tv.Sync() })
@@ -1072,7 +1073,7 @@ func TestSpinner_RunsWhileBusyAndClears(t *testing.T) {
 	slow := &fakeProvider{platform: device.PlatformAndroid, delay: 700 * time.Millisecond, devices: []device.Device{
 		{ID: "a", Name: "a", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateShutdown},
 	}}
-	a := New("t", slow)
+	a := New("t", sims.New(slow))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	time.Sleep(350 * time.Millisecond)
@@ -1119,7 +1120,7 @@ func (p *logProvider) LogCmd(ctx context.Context, _ device.Device, _ *device.App
 
 func TestLogsView_RunnerUntilFirstLine(t *testing.T) {
 	p := &logProvider{fakeProvider: fakeProvider{platform: device.PlatformAndroid}, script: "sleep 0.4; echo hello; sleep 10"}
-	a := New("test", p)
+	a := New("test", sims.New(p))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	var lv *logsView
@@ -1137,7 +1138,7 @@ func TestLogsView_RunnerUntilFirstLine(t *testing.T) {
 }
 
 func TestCreateView_FiltersIncompatibleTypesAndNames(t *testing.T) {
-	a := New("t", &fakeProvider{platform: device.PlatformIOS})
+	a := New("t", sims.New(&fakeProvider{platform: device.PlatformIOS}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	types := []device.DeviceType{
@@ -1148,7 +1149,7 @@ func TestCreateView_FiltersIncompatibleTypesAndNames(t *testing.T) {
 	var name, typ string
 	var all []string
 	onUI(a, func() {
-		cv := newCreateView(a, a.providers[device.PlatformIOS], device.Image{Name: "iOS 17.5", Version: "17.5", Platform: "iOS"}, types)
+		cv := newCreateView(a, sims.PlatformImage{Image: device.Image{Name: "iOS 17.5", Version: "17.5", OS: "iOS"}, Platform: device.PlatformIOS}, types)
 		name = cv.form.GetFormItem(0).(*tview.InputField).GetText()
 		typ = cv.form.GetFormItem(1).(*tview.InputField).GetText()
 		all = cv.labels
@@ -1165,13 +1166,13 @@ func TestCreateView_FiltersIncompatibleTypesAndNames(t *testing.T) {
 }
 
 func TestCreateView_ListOpensOnEnter(t *testing.T) {
-	a := New("t", &fakeProvider{platform: device.PlatformIOS})
+	a := New("t", sims.New(&fakeProvider{platform: device.PlatformIOS}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	types := []device.DeviceType{{ID: "x.a", Name: "iPhone A", Family: "iPhone"}, {ID: "x.b", Name: "iPhone B", Family: "iPhone"}}
 	var cv *createView
 	onUI(a, func() {
-		cv = newCreateView(a, a.providers[device.PlatformIOS], device.Image{Name: "iOS 26.5", Version: "26.5", Platform: "iOS"}, types)
+		cv = newCreateView(a, sims.PlatformImage{Image: device.Image{Name: "iOS 26.5", Version: "26.5", OS: "iOS"}, Platform: device.PlatformIOS}, types)
 		a.push(cv)
 		cv.form.SetFocus(1)
 		a.tv.SetFocus(cv.form)
@@ -1226,7 +1227,7 @@ func TestCreateView_ListOpensOnEnter(t *testing.T) {
 }
 
 func TestCreateView_ListHighlightVisible(t *testing.T) {
-	a := New("t", &fakeProvider{platform: device.PlatformIOS})
+	a := New("t", sims.New(&fakeProvider{platform: device.PlatformIOS}))
 	screen, stop := runHeadless(t, a)
 	defer stop()
 	var types []device.DeviceType
@@ -1234,7 +1235,7 @@ func TestCreateView_ListHighlightVisible(t *testing.T) {
 		types = append(types, device.DeviceType{ID: fmt.Sprintf("com.apple.CoreSimulator.SimDeviceType.iPhone-%d", i), Name: fmt.Sprintf("iPhone %d", i), Screen: "1000x2000 @3x", Family: "iPhone"})
 	}
 	onUI(a, func() {
-		cv := newCreateView(a, a.providers[device.PlatformIOS], device.Image{Name: "iOS 26.5", Version: "26.5", Platform: "iOS"}, types)
+		cv := newCreateView(a, sims.PlatformImage{Image: device.Image{Name: "iOS 26.5", Version: "26.5", OS: "iOS"}, Platform: device.PlatformIOS}, types)
 		a.push(cv)
 		cv.form.SetFocus(1)
 		a.tv.SetFocus(cv.form)
@@ -1293,7 +1294,7 @@ func TestCreateView_CreateBootsAndSelectsTheNewDevice(t *testing.T) {
 	p := &createProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
 		{ID: "old", Name: "old", Platform: device.PlatformIOS, Kind: device.KindVirtual, State: device.StateBooted, LastActiveAt: time.Now()},
 	}}}
-	a := New("t", p)
+	a := New("t", sims.New(p))
 	_, stop := runHeadless(t, a)
 	defer stop()
 	dv := a.stack[0].(*devicesView)
@@ -1301,7 +1302,7 @@ func TestCreateView_CreateBootsAndSelectsTheNewDevice(t *testing.T) {
 	types := []device.DeviceType{{ID: "x.a", Name: "iPhone A", Family: "iPhone"}}
 	onUI(a, func() {
 		a.push(newImagesView(a))
-		cv := newCreateView(a, a.providers[device.PlatformIOS], device.Image{ID: "rt", Name: "iOS 26.5", Version: "26.5", Platform: "iOS"}, types)
+		cv := newCreateView(a, sims.PlatformImage{Image: device.Image{ID: "rt", Name: "iOS 26.5", Version: "26.5", OS: "iOS"}, Platform: device.PlatformIOS}, types)
 		a.push(cv)
 		cv.form.SetFocus(cv.form.GetFormItemCount()) // create button
 		cv.form.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})

@@ -264,7 +264,7 @@ func (p *Provider) Images(ctx context.Context) ([]device.Image, error) {
 	}
 	var images []device.Image
 	for _, r := range runtimes {
-		images = append(images, device.Image{ID: r.Identifier, Name: r.Name, Version: r.Version, Installed: r.IsAvailable, Platform: r.Platform})
+		images = append(images, device.Image{ID: r.Identifier, Name: r.Name, Version: r.Version, Installed: r.IsAvailable, OS: r.Platform})
 	}
 	return images, nil
 }

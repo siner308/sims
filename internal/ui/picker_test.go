@@ -9,6 +9,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 )
 
 func fixtureDir(t *testing.T) string {
@@ -31,7 +32,7 @@ func fixtureDir(t *testing.T) string {
 
 func TestPicker_ListsDirsThenNewestInstallables(t *testing.T) {
 	dir := fixtureDir(t)
-	a := New("test", &fakeProvider{platform: device.PlatformAndroid})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformAndroid}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -86,7 +87,7 @@ func TestPicker_ListsDirsThenNewestInstallables(t *testing.T) {
 
 func TestPicker_AppBundleIsAFileForIOS(t *testing.T) {
 	dir := fixtureDir(t)
-	a := New("test", &fakeProvider{platform: device.PlatformIOS})
+	a := New("test", sims.New(&fakeProvider{platform: device.PlatformIOS}))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -142,7 +143,7 @@ func TestPickAndInstall_FallsBackToTUIPicker(t *testing.T) {
 	fp := &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{
 		{ID: "avd1", Name: "Pixel_7", Platform: device.PlatformAndroid, Kind: device.KindVirtual, State: device.StateBooted, Serial: "emulator-5554"},
 	}}
-	a := New("test", fp)
+	a := New("test", sims.New(fp))
 	_, stop := runHeadless(t, a)
 	defer stop()
 
@@ -150,6 +151,6 @@ func TestPickAndInstall_FallsBackToTUIPicker(t *testing.T) {
 	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 })
 	var av *appsView
 	a.tv.QueueUpdate(func() { dv.openApps(); av = a.top().(*appsView) })
-	a.tv.QueueUpdate(func() { av.pickAndInstall(fp, true) })
+	a.tv.QueueUpdate(func() { av.pickAndInstall(true) })
 	waitFor(t, a, 5*time.Second, func() bool { _, ok := a.top().(*pickerView); return ok })
 }

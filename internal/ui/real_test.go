@@ -6,11 +6,12 @@ import (
 
 	"github.com/siner308/sims/internal/device/android"
 	"github.com/siner308/sims/internal/device/ios"
+	"github.com/siner308/sims/internal/sims"
 )
 
 func TestApp_RealProviders(t *testing.T) {
-	a := New("test", android.New(), ios.New())
-	if len(a.providers) == 0 {
+	a := New("test", sims.New(android.New(), ios.New()))
+	if len(a.m.Platforms()) == 0 {
 		t.Skip("no toolchain available")
 	}
 	_, stop := runHeadless(t, a)

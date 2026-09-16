@@ -48,17 +48,17 @@ const (
 
 // ID is what the provider needs back to act on the device: AVD name on Android, UDID on iOS.
 type Device struct {
-	ID        string
-	Name      string
-	Model     string
-	Platform  Platform
-	Kind      Kind
-	Transport Transport
-	Runtime   string
-	State     State
-	Serial    string // adb serial while an Android device is reachable; empty otherwise
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Model     string    `json:"model,omitempty"`
+	Platform  Platform  `json:"platform"`
+	Kind      Kind      `json:"kind"`
+	Transport Transport `json:"transport"`
+	Runtime   string    `json:"runtime,omitempty"`
+	State     State     `json:"state"`
+	Serial    string    `json:"serial,omitempty"` // adb serial while an Android device is reachable; empty otherwise
 	// LastActiveAt is the last boot (virtual) or last connection (physical); zero when the platform does not record it.
-	LastActiveAt time.Time
+	LastActiveAt time.Time `json:"lastActiveAt,omitzero"`
 }
 
 // StateRank orders states for display: running first, then reachable-but-idle, then stopped.
@@ -82,13 +82,18 @@ func (d Device) Running() bool {
 	return d.State == StateBooted || d.State == StateConnected
 }
 
+// NeverBooted marks a simulator that has never run: a stock Xcode lists dozens, so listings hide them by default.
+func (d Device) NeverBooted() bool {
+	return d.Platform == PlatformIOS && d.Kind == KindVirtual && d.LastActiveAt.IsZero() && !d.Running()
+}
+
 type App struct {
-	BundleID string
-	Name     string
-	Version  string
-	System   bool   // shipped with the image (system partition / Apple built-in)
-	Source   string // who installed it: "preinstalled", "store", "adb", "simctl", or "" when unknown
-	Process  string // executable name as the OS logger reports it; empty when unknown
+	BundleID string `json:"bundleId"`
+	Name     string `json:"name"`
+	Version  string `json:"version,omitempty"`
+	System   bool   `json:"system"`            // shipped with the image (system partition / Apple built-in)
+	Source   string `json:"source,omitempty"`  // who installed it: "preinstalled", "store", "adb", "simctl", or "" when unknown
+	Process  string `json:"process,omitempty"` // executable name as the OS logger reports it; empty when unknown
 }
 
 // ProcessName is what log filters match on; the display name is the fallback when the executable is unknown.
@@ -100,11 +105,11 @@ func (a App) ProcessName() string {
 }
 
 type Image struct {
-	ID        string
-	Name      string
-	Version   string
-	Installed bool
-	Platform  string // OS the image runs ("iOS", "tvOS", "watchOS"); empty when the platform has only one
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Version   string `json:"version,omitempty"`
+	Installed bool   `json:"installed"`
+	OS        string `json:"os,omitempty"` // OS the image runs ("iOS", "tvOS", "watchOS"); empty when the platform has only one
 }
 
 type Provider interface {
@@ -129,17 +134,17 @@ type Provider interface {
 
 // DeviceType is a hardware profile a virtual device can be created from.
 type DeviceType struct {
-	ID     string
-	Name   string
-	Screen string // "1080x2400" plus density or scale when the platform exposes it; empty when unknown
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Screen string `json:"screen,omitempty"` // "1080x2400" plus density or scale when the platform exposes it; empty when unknown
 	// MinRuntime and MaxRuntime bound the OS versions the type can run ("12.3.1", "15.255.255"); empty means any
-	MinRuntime string
-	MaxRuntime string
-	Family     string // product line ("iPhone", "iPad", "Apple TV", "Apple Watch"); empty when unknown
+	MinRuntime string `json:"minRuntime,omitempty"`
+	MaxRuntime string `json:"maxRuntime,omitempty"`
+	Family     string `json:"family,omitempty"` // product line ("iPhone", "iPad", "Apple TV", "Apple Watch"); empty when unknown
 }
 
-// familiesByPlatform lists which product lines boot which OS; simctl exposes both but does not tie them.
-var familiesByPlatform = map[string][]string{
+// familiesByOS lists which product lines boot which OS; simctl exposes both but does not tie them.
+var familiesByOS = map[string][]string{
 	"iOS":      {"iPhone", "iPad"},
 	"tvOS":     {"Apple TV"},
 	"watchOS":  {"Apple Watch"},
@@ -150,7 +155,7 @@ var familiesByPlatform = map[string][]string{
 // Supports reports whether a type can run the image: its OS version must fall inside the type's
 // runtime bounds and its product line must boot that OS. Unknown bounds, platform or family count as compatible.
 func (t DeviceType) Supports(img Image) bool {
-	if families, known := familiesByPlatform[img.Platform]; known && t.Family != "" && !slices.Contains(families, t.Family) {
+	if families, known := familiesByOS[img.OS]; known && t.Family != "" && !slices.Contains(families, t.Family) {
 		return false
 	}
 	if img.Version == "" {
@@ -212,9 +217,9 @@ func versionParts(v string) []int {
 
 // Hardware is the part of a virtual device's configuration that a user tunes: zero values mean "leave as is".
 type Hardware struct {
-	RAMMB  int
-	Cores  int
-	DiskGB int
+	RAMMB  int `json:"ramMb,omitempty"`
+	Cores  int `json:"cores,omitempty"`
+	DiskGB int `json:"diskGb,omitempty"`
 }
 
 // HardwareEditor is implemented by providers whose virtual devices keep editable hardware settings.

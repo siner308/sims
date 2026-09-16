@@ -12,6 +12,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 )
 
 type sortColumn int
@@ -85,22 +86,15 @@ func (v *devicesView) Hints() []hint {
 func (v *devicesView) Refresh() {
 	v.app.setStatus(" loading devices...")
 	var all []device.Device
-	var errs []string
+	var listErr error
 	v.app.async(func() error {
-		for _, p := range v.app.providers {
-			list, err := p.List(v.app.ctx)
-			if err != nil {
-				errs = append(errs, err.Error())
-				continue
-			}
-			all = append(all, list...)
-		}
+		all, listErr = v.app.m.Devices(v.app.ctx)
 		return nil
 	}, func() {
 		v.devices = all
 		v.render()
-		if len(errs) > 0 {
-			v.app.flashErr(fmt.Errorf("%s", strings.Join(errs, "; ")))
+		if listErr != nil {
+			v.app.flashErr(listErr)
 		} else {
 			v.app.setStatus("")
 		}
@@ -149,20 +143,12 @@ func compareBy(col sortColumn, a, b device.Device) int {
 // The default order is state, then most recent, then name desc, then runtime desc.
 // A chosen column goes first and the default chain breaks its ties.
 func (v *devicesView) sortDevices() {
-	base := func(a, b device.Device) int {
-		return cmp.Or(
-			compareBy(colState, a, b),
-			compareBy(colLast, b, a),
-			compareBy(colName, b, a),
-			compareBy(colRuntime, b, a),
-		)
-	}
 	slices.SortStableFunc(v.devices, func(a, b device.Device) int {
 		primary := compareBy(v.sort.col, a, b)
 		if v.sort.desc {
 			primary = -primary
 		}
-		return cmp.Or(primary, base(a, b))
+		return cmp.Or(primary, sims.DefaultOrder(a, b))
 	})
 }
 
@@ -191,7 +177,7 @@ func (v *devicesView) render() {
 	setHeader(v.table, headers...)
 	r, row, hidden := 1, 1, 0
 	for _, d := range v.devices {
-		if !v.showUnused && neverUsedSimulator(d) {
+		if !v.showUnused && d.NeverBooted() {
 			hidden++
 			continue
 		}
@@ -231,10 +217,6 @@ func (v *devicesView) render() {
 	v.table.SetTitle(title)
 }
 
-func neverUsedSimulator(d device.Device) bool {
-	return d.Platform == device.PlatformIOS && d.Kind == device.KindVirtual && d.LastActiveAt.IsZero() && !d.Running()
-}
-
 func relativeTime(t, now time.Time) string {
 	if t.IsZero() {
 		return "-"
@@ -269,13 +251,13 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.openApps()
 		return nil
 	case tcell.KeyCtrlK:
-		v.act("shutdown", false, func(p device.Provider, d device.Device) error { return p.Shutdown(v.app.ctx, d) })
+		v.act("shutdown", false, v.app.m.Shutdown)
 		return nil
 	case tcell.KeyCtrlE:
-		v.act("wipe data of", true, func(p device.Provider, d device.Device) error { return p.Erase(v.app.ctx, d) })
+		v.act("wipe data of", true, v.app.m.Erase)
 		return nil
 	case tcell.KeyCtrlD:
-		v.act("delete device", true, func(p device.Provider, d device.Device) error { return p.Delete(v.app.ctx, d) })
+		v.act("delete device", true, v.app.m.Delete)
 		return nil
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		if d, ok := v.selected(); ok {
@@ -292,7 +274,7 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.app.prompt("filter:", "", func(s string) { v.filter = s; v.render() })
 		return nil
 	case 'b':
-		v.act("boot", false, func(p device.Provider, d device.Device) error { return p.Boot(v.app.ctx, d) })
+		v.act("boot", false, v.app.m.Boot)
 	case 'a':
 		v.openApps()
 	case 'l':
@@ -302,15 +284,9 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case 'n':
 		v.app.push(newImagesView(v.app))
 	case 'w':
-		if d, ok := v.selected(); ok && d.Platform == device.PlatformIOS {
-			v.connect(d)
-			return nil
-		}
-		v.wireless(func(w device.Wireless, d device.Device) (string, error) { return w.EnableWireless(v.app.ctx, d) })
+		v.connect()
 	case 'x':
-		v.wireless(func(w device.Wireless, d device.Device) (string, error) {
-			return "disconnected", w.Disconnect(v.app.ctx, d)
-		})
+		v.disconnect()
 	case 'p':
 		v.pair()
 	case 'e':
@@ -354,20 +330,15 @@ func (v *devicesView) openApps() {
 		v.app.flashErr(fmt.Errorf("%s is %s; %s", d.Name, strings.ToLower(string(d.State)), hint))
 		return
 	}
-	p, err := v.app.providerFor(d)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
 	v.app.confirm(fmt.Sprintf("%s is not running. Boot it and open apps?", d.Name), func() {
 		v.app.setStatus(" booting " + d.Name + "...")
 		var booted device.Device
 		v.app.async(func() error {
-			if err := p.Boot(v.app.ctx, d); err != nil {
+			if err := v.app.m.Boot(v.app.ctx, d); err != nil {
 				return err
 			}
 			var err error
-			booted, err = waitBooted(v.app.ctx, p, d, bootTimeout)
+			booted, err = v.app.m.WaitBooted(v.app.ctx, d, sims.BootTimeout)
 			return err
 		}, func() {
 			v.app.setStatus("")
@@ -377,70 +348,35 @@ func (v *devicesView) openApps() {
 	})
 }
 
-const bootTimeout = 3 * time.Minute
-
-func waitBooted(ctx context.Context, p device.Provider, d device.Device, timeout time.Duration) (device.Device, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		list, err := p.List(ctx)
-		if err != nil {
-			return device.Device{}, err
-		}
-		for _, cur := range list {
-			if cur.ID == d.ID && cur.Running() {
-				return cur, nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return device.Device{}, ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-	return device.Device{}, fmt.Errorf("%s did not finish booting within %s", d.Name, timeout)
-}
-
-func (v *devicesView) connect(d device.Device) {
-	p, err := v.app.providerFor(d)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
-	c, ok := p.(device.Connector)
-	if !ok {
-		v.app.flashErr(fmt.Errorf("%s has no connect action", d.Platform))
-		return
-	}
-	v.app.setStatus(" connecting to " + d.Name + " (same wifi, unlocked, developer mode on)...")
-	v.app.async(func() error { return c.Connect(v.app.ctx, d) }, func() {
-		v.app.flash("connected " + d.Name)
-		v.Refresh()
-	})
-}
-
-func (v *devicesView) wireless(fn func(device.Wireless, device.Device) (string, error)) {
+func (v *devicesView) connect() {
 	d, ok := v.selected()
 	if !ok {
 		return
 	}
-	p, err := v.app.providerFor(d)
-	if err != nil {
-		v.app.flashErr(err)
-		return
+	if d.Platform == device.PlatformIOS {
+		v.app.setStatus(" connecting to " + d.Name + " (same wifi, unlocked, developer mode on)...")
+	} else {
+		v.app.setStatus(" " + d.Name + ": switching to adb over wifi...")
 	}
-	w, ok := p.(device.Wireless)
-	if !ok {
-		v.app.flashErr(fmt.Errorf("%s has no wireless debugging support", d.Platform))
-		return
-	}
-	v.app.setStatus(" " + d.Name + ": working...")
-	var result string
+	var note string
 	v.app.async(func() error {
 		var err error
-		result, err = fn(w, d)
+		note, err = v.app.m.Connect(v.app.ctx, d)
 		return err
 	}, func() {
-		v.app.flash(d.Name + ": " + result)
+		v.app.flash(d.Name + ": " + note)
+		v.Refresh()
+	})
+}
+
+func (v *devicesView) disconnect() {
+	d, ok := v.selected()
+	if !ok {
+		return
+	}
+	v.app.setStatus(" " + d.Name + ": disconnecting...")
+	v.app.async(func() error { return v.app.m.Disconnect(v.app.ctx, d) }, func() {
+		v.app.flash(d.Name + ": disconnected")
 		v.Refresh()
 	})
 }
@@ -450,23 +386,13 @@ func (v *devicesView) editHardware() {
 	if !ok {
 		return
 	}
-	p, err := v.app.providerFor(d)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
-	editor, ok := p.(device.HardwareEditor)
-	if !ok || d.Kind != device.KindVirtual {
-		v.app.flashErr(fmt.Errorf("%s has no editable hardware here", d.Name))
-		return
-	}
 	var current device.Hardware
 	v.app.async(func() error {
 		var err error
-		current, err = editor.Hardware(v.app.ctx, d)
+		current, err = v.app.m.Hardware(v.app.ctx, d)
 		return err
 	}, func() {
-		v.app.push(newHardwareView(v.app, editor, d, current))
+		v.app.push(newHardwareView(v.app, d, current))
 	})
 }
 
@@ -475,19 +401,13 @@ func (v *devicesView) pair() {
 	if !ok {
 		return
 	}
-	p, err := v.app.providerFor(d)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
-	pairer, ok := p.(device.Pairer)
-	if !ok {
+	if d.Platform == device.PlatformAndroid {
 		v.app.flashErr(fmt.Errorf("%s pairs with :pair HOST:PORT CODE", d.Platform))
 		return
 	}
 	v.app.confirm(fmt.Sprintf("pair %s?\n\n%s", d.Name, pairingGuide), func() {
 		v.app.setStatus(" pairing " + d.Name + ": accept the prompt on the phone (up to 2 minutes)...")
-		v.app.async(func() error { return pairer.PairDevice(v.app.ctx, d) }, func() {
+		v.app.async(func() error { return v.app.m.Pair(v.app.ctx, d) }, func() {
 			v.app.flash("paired " + d.Name + "; unplug it and use w to reach it over wifi")
 			v.Refresh()
 		})
@@ -500,19 +420,14 @@ const pairingGuide = "Before answering yes:\n" +
 	"2. For a phone this Mac has never seen, it is plugged in over USB and you tapped Trust\n" +
 	"3. Then accept the pairing prompt that appears on the phone"
 
-func (v *devicesView) act(verb string, dangerous bool, fn func(device.Provider, device.Device) error) {
+func (v *devicesView) act(verb string, dangerous bool, fn func(context.Context, device.Device) error) {
 	d, ok := v.selected()
 	if !ok {
 		return
 	}
-	p, err := v.app.providerFor(d)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
 	run := func() {
 		v.app.setStatus(fmt.Sprintf(" %s %s...", verb, d.Name))
-		v.app.async(func() error { return fn(p, d) }, func() {
+		v.app.async(func() error { return fn(v.app.ctx, d) }, func() {
 			v.app.flash(fmt.Sprintf("%s %s: ok", verb, d.Name))
 			v.Refresh()
 		})

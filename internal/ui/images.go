@@ -1,9 +1,8 @@
 package ui
 
 import (
-	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -11,17 +10,13 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/sims"
 )
-
-type imageRow struct {
-	platform device.Platform
-	image    device.Image
-}
 
 type imagesView struct {
 	app     *App
 	table   *tview.Table
-	rows    []imageRow
+	rows    []sims.PlatformImage
 	filter  string
 	showAll bool
 }
@@ -41,38 +36,16 @@ func (v *imagesView) Hints() []hint {
 
 func (v *imagesView) Refresh() {
 	v.app.setStatus(" loading images...")
-	var rows []imageRow
-	var errs []string
+	var rows []sims.PlatformImage
+	var listErr error
 	v.app.async(func() error {
-		for _, p := range v.app.providers {
-			imgs, err := p.Images(v.app.ctx)
-			if err != nil {
-				errs = append(errs, err.Error())
-				continue
-			}
-			for _, img := range imgs {
-				rows = append(rows, imageRow{platform: p.Platform(), image: img})
-			}
-		}
+		rows, listErr = v.app.m.Images(v.app.ctx)
 		return nil
 	}, func() {
-		sort.SliceStable(rows, func(i, j int) bool {
-			a, b := rows[i], rows[j]
-			if a.image.Installed != b.image.Installed {
-				return a.image.Installed
-			}
-			if a.platform != b.platform {
-				return a.platform < b.platform
-			}
-			if a.image.Version != b.image.Version {
-				return a.image.Version > b.image.Version
-			}
-			return a.image.Name < b.image.Name
-		})
 		v.rows = rows
 		v.render()
-		if len(errs) > 0 {
-			v.app.flashErr(fmt.Errorf("%s", strings.Join(errs, "; ")))
+		if listErr != nil {
+			v.app.flashErr(listErr)
 		} else {
 			v.app.setStatus("")
 		}
@@ -84,22 +57,22 @@ func (v *imagesView) render() {
 	setHeader(v.table, "PLATFORM", "VERSION", "NAME", "INSTALLED", "ID")
 	r, hidden := 1, 0
 	for _, row := range v.rows {
-		if !v.showAll && !row.image.Installed {
+		if !v.showAll && !row.Installed {
 			hidden++
 			continue
 		}
-		if v.filter != "" && !strings.Contains(strings.ToLower(row.image.ID+row.image.Name), strings.ToLower(v.filter)) {
+		if v.filter != "" && !strings.Contains(strings.ToLower(row.ID+row.Name), strings.ToLower(v.filter)) {
 			continue
 		}
 		installed := "[gray]no[-]"
-		if row.image.Installed {
+		if row.Installed {
 			installed = "[green]yes[-]"
 		}
-		v.table.SetCell(r, 0, tview.NewTableCell(string(row.platform)).SetReference(row))
-		v.table.SetCell(r, 1, tview.NewTableCell(row.image.Version))
-		v.table.SetCell(r, 2, tview.NewTableCell(highlight(row.image.Name, v.filter)))
+		v.table.SetCell(r, 0, tview.NewTableCell(string(row.Platform)).SetReference(row))
+		v.table.SetCell(r, 1, tview.NewTableCell(row.Version))
+		v.table.SetCell(r, 2, tview.NewTableCell(highlight(row.Name, v.filter)))
 		v.table.SetCell(r, 3, tview.NewTableCell(installed))
-		v.table.SetCell(r, 4, tview.NewTableCell(highlight(row.image.ID, v.filter)).SetTextColor(tcell.ColorGray))
+		v.table.SetCell(r, 4, tview.NewTableCell(highlight(row.ID, v.filter)).SetTextColor(tcell.ColorGray))
 		r++
 	}
 	if r == 1 {
@@ -117,13 +90,13 @@ func (v *imagesView) render() {
 	v.table.SetTitle(title)
 }
 
-func (v *imagesView) selected() (imageRow, bool) {
+func (v *imagesView) selected() (sims.PlatformImage, bool) {
 	row, _ := v.table.GetSelection()
 	cell := v.table.GetCell(row, 0)
 	if cell == nil {
-		return imageRow{}, false
+		return sims.PlatformImage{}, false
 	}
-	ir, ok := cell.GetReference().(imageRow)
+	ir, ok := cell.GetReference().(sims.PlatformImage)
 	return ir, ok
 }
 
@@ -139,15 +112,14 @@ func (v *imagesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		if !ok {
 			return nil
 		}
-		if row.image.Installed {
+		if row.Installed {
 			v.app.flash("already installed")
 			return nil
 		}
-		p := v.app.providers[row.platform]
-		v.app.confirm(fmt.Sprintf("install %s?", row.image.ID), func() {
-			v.app.setStatus(" installing " + row.image.ID + " (this can take minutes)...")
-			v.app.async(func() error { return p.InstallImage(v.app.ctx, row.image) }, func() {
-				v.app.flash("installed " + row.image.ID)
+		v.app.confirm(fmt.Sprintf("install %s?", row.ID), func() {
+			v.app.setStatus(" installing " + row.ID + " (this can take minutes)...")
+			v.app.async(func() error { return v.app.m.InstallImage(v.app.ctx, row) }, func() {
+				v.app.flash("installed " + row.ID)
 				v.Refresh()
 			})
 		})
@@ -156,7 +128,7 @@ func (v *imagesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		if !ok {
 			return nil
 		}
-		if !row.image.Installed {
+		if !row.Installed {
 			v.app.flash("install the image first (<i>)")
 			return nil
 		}
@@ -167,15 +139,14 @@ func (v *imagesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	return nil
 }
 
-func (v *imagesView) createFrom(row imageRow) {
-	p := v.app.providers[row.platform]
+func (v *imagesView) createFrom(img sims.PlatformImage) {
 	var types []device.DeviceType
 	v.app.async(func() error {
 		var err error
-		types, err = p.DeviceTypes(v.app.ctx)
+		types, err = v.app.m.DeviceTypes(v.app.ctx, img.Platform)
 		return err
 	}, func() {
-		v.app.push(newCreateView(v.app, p, row.image, types))
+		v.app.push(newCreateView(v.app, img, types))
 	})
 }
 
@@ -190,16 +161,16 @@ type createView struct {
 
 // Android AVDs take RAM, cores and disk; simulators have no such knobs, so the form only shows them
 // when the provider can write them back.
-func newCreateView(a *App, p device.Provider, img device.Image, types []device.DeviceType) *createView {
+func newCreateView(a *App, img sims.PlatformImage, types []device.DeviceType) *createView {
 	compatible := make([]device.DeviceType, 0, len(types))
 	for _, t := range types {
-		if t.Supports(img) {
+		if t.Supports(img.Image) {
 			compatible = append(compatible, t)
 		}
 	}
 	types = compatible
 	v := &createView{app: a, form: tview.NewForm()}
-	v.form.SetBorder(true).SetTitle(fmt.Sprintf(" new %s device from %s ", p.Platform(), img.Name)).SetTitleColor(titleColor())
+	v.form.SetBorder(true).SetTitle(fmt.Sprintf(" new %s device from %s ", img.Platform, img.Name)).SetTitleColor(titleColor())
 	v.form.SetFieldStyle(fieldStyle).SetLabelColor(tcell.ColorYellow)
 	v.form.SetButtonStyle(buttonStyle).SetButtonActivatedStyle(focusStyle)
 	v.form.SetInputCapture(v.onKey)
@@ -211,22 +182,8 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 	defaultName = strings.ReplaceAll(defaultName, " ", "_")
 	labels := deviceTypeLabels(types)
 	defaultType := ""
-	for i, t := range types {
-		if strings.Contains(strings.ToLower(t.ID), "pixel_7") || strings.HasSuffix(t.ID, "iPhone-17-Pro") {
-			defaultType = labels[i]
-		}
-	}
-	if defaultType == "" {
-		// simctl lists phones newest first, then pads, TVs and watches; land on the newest phone
-		for _, l := range labels {
-			if strings.Contains(strings.ToLower(l), "iphone") {
-				defaultType = l
-				break
-			}
-		}
-	}
-	if defaultType == "" && len(labels) > 0 {
-		defaultType = labels[0]
+	if t, ok := sims.DefaultDeviceType(types); ok {
+		defaultType = labels[slices.IndexFunc(types, func(c device.DeviceType) bool { return c.ID == t.ID })]
 	}
 	v.form.AddInputField("name", defaultName, 40, nil, nil)
 	// the device type is a text field with a filtering completion list: typing "pixel 9" narrows the
@@ -253,7 +210,7 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 	v.completion = typeField
 	v.labels = labels
 
-	_, editable := p.(device.HardwareEditor)
+	editable := a.m.CanEditHardware(img.Platform)
 	if editable {
 		addHardwareFields(v.form, device.Hardware{RAMMB: 2048, Cores: 4, DiskGB: 6})
 	}
@@ -279,15 +236,12 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 		a.setStatus(" creating and booting " + name + "...")
 		var created device.Device
 		a.async(func() error {
-			if err := p.Create(a.ctx, name, img, deviceType, hw); err != nil {
-				return err
-			}
-			d, err := findCreated(a.ctx, p, name)
+			d, err := a.m.Create(a.ctx, img, name, deviceType, hw)
 			if err != nil {
 				return err
 			}
 			created = d
-			return p.Boot(a.ctx, d)
+			return a.m.Boot(a.ctx, d)
 		}, func() {
 			a.pop()
 			a.pop()
@@ -300,29 +254,6 @@ func newCreateView(a *App, p device.Provider, img device.Image, types []device.D
 	v.form.AddButton("cancel", func() { a.pop() })
 	v.form.SetCancelFunc(func() { a.pop() })
 	return v
-}
-
-// findCreated looks the new device up by name: Create returns no id, and a fresh simulator has no
-// boot history, so among namesakes the never-booted one is the new one.
-func findCreated(ctx context.Context, p device.Provider, name string) (device.Device, error) {
-	devices, err := p.List(ctx)
-	if err != nil {
-		return device.Device{}, err
-	}
-	var found *device.Device
-	for i := range devices {
-		d := devices[i]
-		if d.Name != name || d.Kind != device.KindVirtual {
-			continue
-		}
-		if found == nil || (d.LastActiveAt.IsZero() && !found.LastActiveAt.IsZero()) {
-			found = &d
-		}
-	}
-	if found == nil {
-		return device.Device{}, fmt.Errorf("%s was created but does not show up in the device list yet; refresh (r) and boot it with b", name)
-	}
-	return *found, nil
 }
 
 // filterLabels keeps the labels that contain every whitespace-separated word of the query, case-insensitively.
@@ -516,7 +447,7 @@ type hardwareView struct {
 	form *tview.Form
 }
 
-func newHardwareView(a *App, editor device.HardwareEditor, d device.Device, current device.Hardware) *hardwareView {
+func newHardwareView(a *App, d device.Device, current device.Hardware) *hardwareView {
 	v := &hardwareView{app: a, form: tview.NewForm()}
 	v.form.SetBorder(true).SetTitle(fmt.Sprintf(" hardware of %s ", d.Name)).SetTitleColor(titleColor())
 	v.form.SetFieldStyle(fieldStyle).SetLabelColor(tcell.ColorYellow)
@@ -532,7 +463,7 @@ func newHardwareView(a *App, editor device.HardwareEditor, d device.Device, curr
 			a.flashErr(err)
 			return
 		}
-		a.async(func() error { return editor.SetHardware(a.ctx, d, hw) }, func() {
+		a.async(func() error { return a.m.SetHardware(a.ctx, d, hw) }, func() {
 			msg := "saved hardware of " + d.Name
 			if d.Running() {
 				msg += " (takes effect after the next boot)"

@@ -40,16 +40,11 @@ func (v *appsView) Hints() []hint {
 }
 
 func (v *appsView) Refresh() {
-	p, err := v.app.providerFor(v.dev)
-	if err != nil {
-		v.app.flashErr(err)
-		return
-	}
 	v.app.setStatus(" loading apps...")
 	var apps []device.App
 	v.app.async(func() error {
 		var err error
-		apps, err = p.Apps(v.app.ctx, v.dev)
+		apps, err = v.app.m.Apps(v.app.ctx, v.dev)
 		return err
 	}, func() {
 		v.apps = apps
@@ -109,26 +104,21 @@ func (v *appsView) selected() (device.App, bool) {
 }
 
 func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
-	p, err := v.app.providerFor(v.dev)
-	if err != nil {
-		v.app.flashErr(err)
-		return nil
-	}
 	switch {
 	case ev.Key() == tcell.KeyEnter:
 		if a, ok := v.selected(); ok {
-			v.app.async(func() error { return p.LaunchApp(v.app.ctx, v.dev, a.BundleID) }, func() {
+			v.app.async(func() error { return v.app.m.LaunchApp(v.app.ctx, v.dev, a.BundleID) }, func() {
 				v.app.flash("launched " + a.BundleID)
 			})
 		}
 	case ev.Rune() == 'i':
-		v.pickAndInstall(p, true)
+		v.pickAndInstall(true)
 	case ev.Rune() == 'I':
-		v.pickAndInstall(p, false)
+		v.pickAndInstall(false)
 	case ev.Key() == tcell.KeyCtrlU:
 		if a, ok := v.selected(); ok {
 			v.app.confirm(fmt.Sprintf("uninstall %s?", a.BundleID), func() {
-				v.app.async(func() error { return p.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {
+				v.app.async(func() error { return v.app.m.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {
 					v.app.flash("uninstalled " + a.BundleID)
 					v.Refresh()
 				})
@@ -158,10 +148,10 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 }
 
 // The OS dialog runs off the UI goroutine; a platform without one falls back to the TUI picker.
-func (v *appsView) pickAndInstall(p device.Provider, native bool) {
+func (v *appsView) pickAndInstall(native bool) {
 	install := func(path string) {
 		v.app.setStatus(" installing " + path + "...")
-		v.app.async(func() error { return p.InstallApp(v.app.ctx, v.dev, path) }, func() {
+		v.app.async(func() error { return v.app.m.InstallApp(v.app.ctx, v.dev, path) }, func() {
 			v.app.flash("installed " + path)
 			v.Refresh()
 		})
