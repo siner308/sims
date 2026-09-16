@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ func (c *cli) deviceCmd() *cobra.Command {
 		c.deviceActionCmd("erase", "Wipe a device's data; the device itself stays", c.Manager.Erase),
 		c.deviceActionCmd("delete", "Delete a virtual device, or forget a paired phone", c.Manager.Delete),
 		c.deviceCreateCmd(), c.deviceHardwareCmd(), c.deviceKeyCmd(),
+		c.deviceScreenshotCmd(), c.deviceRebootCmd(),
 		c.deviceConnectCmd(), c.deviceDisconnectCmd(), c.devicePairCmd(), c.deviceLogsCmd(),
 	)
 	return cmd
@@ -286,6 +288,83 @@ func (c *cli) deviceKeyCmd() *cobra.Command {
 			return c.result(d, string(key)+" sent to "+d.Name)
 		}),
 	}
+}
+
+func (c *cli) deviceScreenshotCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "screenshot <device> [path]",
+		Short: "Save the screen of a running device as a PNG",
+		Long:  "Save the screen of a running device as a PNG. Without a path the file is named after the device and the time; a path of - writes the image to stdout.",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: c.run(func(ctx context.Context, args []string) error {
+			d, err := c.resolve(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			png, err := c.Manager.Screenshot(ctx, d)
+			if err != nil {
+				return err
+			}
+			path := ""
+			if len(args) == 2 {
+				path = args[1]
+			}
+			if path == "-" {
+				_, err := c.Out.Write(png)
+				return err
+			}
+			if path == "" {
+				path = screenshotName(d.Name, c.now())
+			}
+			if err := os.WriteFile(path, png, 0o644); err != nil {
+				return err
+			}
+			return c.result(map[string]any{"path": path, "bytes": len(png)}, fmt.Sprintf("wrote %s (%d bytes)", path, len(png)))
+		}),
+	}
+}
+
+// screenshotName keeps the device name usable as a filename: a simulator name carries spaces and
+// an adb serial carries a colon, which Windows refuses outright.
+func screenshotName(name string, now time.Time) string {
+	safe := strings.Map(func(r rune) rune {
+		if strings.ContainsRune(` /\:*?"<>|`, r) {
+			return '_'
+		}
+		return r
+	}, name)
+	return fmt.Sprintf("%s-%s.png", safe, now.Format("20060102-150405"))
+}
+
+func (c *cli) deviceRebootCmd() *cobra.Command {
+	var wait bool
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "reboot <device>",
+		Short: "Restart a running device",
+		Long:  "Restart a running device. A simulator shuts down and boots again, since simctl has no reboot of its own; an Android device and an iPhone restart in place.",
+		Args:  cobra.ExactArgs(1),
+		RunE: c.run(func(ctx context.Context, args []string) error {
+			d, err := c.resolve(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if err := c.Manager.Reboot(ctx, d); err != nil {
+				return err
+			}
+			if !wait {
+				return c.result(d, "rebooting "+d.Name)
+			}
+			booted, err := c.Manager.WaitBooted(ctx, d, timeout)
+			if err != nil {
+				return err
+			}
+			return c.result(booted, "rebooted "+booted.Name)
+		}),
+	}
+	cmd.Flags().BoolVarP(&wait, "wait", "w", false, "return once the device is back up")
+	cmd.Flags().DurationVar(&timeout, "timeout", sims.BootTimeout, "how long --wait waits")
+	return cmd
 }
 
 func (c *cli) deviceConnectCmd() *cobra.Command {

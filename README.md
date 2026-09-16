@@ -150,6 +150,8 @@ sims device shutdown | erase | delete <device>   # delete on a phone forgets it:
 sims device create <name> --image <image> [--type <type>] [--ram MB --cores N --disk GB] [--boot] [--timeout 3m]
 sims device hardware <device> [--ram MB --cores N --disk GB]   # AVD only; no flags prints the current values
 sims device key <device> home|back|overview # android only; a simulator takes keys in its own window
+sims device screenshot <device> [path]      # PNG; no path names it after the device and the time, - writes it to stdout
+sims device reboot <device> [--wait] [--timeout 3m]   # a simulator shuts down and boots again, since simctl has no reboot
 sims device logs <device> [--app <bundle>]
 sims device connect <device>                # iPhone: open the wifi tunnel; USB Android phone: switch to adb over wifi
 sims device connect <host:port>             # adb connect

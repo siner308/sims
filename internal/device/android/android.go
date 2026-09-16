@@ -87,17 +87,27 @@ func (p *Provider) List(ctx context.Context) ([]device.Device, error) {
 			State:        device.StateShutdown,
 			LastActiveAt: lastBootOf(name),
 		}
-		if serial, ok := running[name]; ok {
-			d.State = device.StateBooted
-			d.Serial = serial
+		if r, ok := running[name]; ok {
+			d.State, d.Serial = device.StateBooted, r.serial
+			if !r.bootCompleted {
+				d.State = device.StateBooting
+			}
 		}
 		devices = append(devices, d)
 	}
 	return append(devices, p.physicalDevices(ctx, entries)...), nil
 }
 
-func (p *Provider) runningSerials(ctx context.Context, entries []adbEntry) map[string]string {
-	result := map[string]string{}
+type runningEmulator struct {
+	serial        string
+	bootCompleted bool
+}
+
+// adbd answers well before the framework has finished starting, so an emulator that adb already
+// lists is only Booted once sys.boot_completed is set; until then it is still Booting, and a caller
+// waiting for it does not get a device that refuses the install it is about to attempt.
+func (p *Provider) runningSerials(ctx context.Context, entries []adbEntry) map[string]runningEmulator {
+	result := map[string]runningEmulator{}
 	for _, e := range entries {
 		if !e.isEmulator() || e.state != "device" {
 			continue
@@ -107,10 +117,15 @@ func (p *Provider) runningSerials(ctx context.Context, entries []adbEntry) map[s
 			continue
 		}
 		if l := lines(name); len(l) > 0 {
-			result[l[0]] = e.serial
+			result[l[0]] = runningEmulator{serial: e.serial, bootCompleted: p.bootCompleted(ctx, e.serial)}
 		}
 	}
 	return result
+}
+
+func (p *Provider) bootCompleted(ctx context.Context, serial string) bool {
+	out, err := run(ctx, p.sdk.adb(), "-s", serial, "shell", "getprop", "sys.boot_completed")
+	return err == nil && strings.TrimSpace(out) == "1"
 }
 
 // The emulator rewrites emu-launch-params.txt on every launch, which makes its mtime the last boot time.
@@ -403,15 +418,57 @@ func (p *Provider) DeviceTypes(ctx context.Context) ([]device.DeviceType, error)
 	return types, nil
 }
 
+func (p *Provider) Screenshot(ctx context.Context, d device.Device) ([]byte, error) {
+	if d.Serial == "" {
+		return nil, errors.New("device is not running")
+	}
+	// exec-out keeps the PNG bytes intact; plain `adb shell` would translate the line endings and corrupt it.
+	return runRaw(ctx, p.sdk.adb(), "-s", d.Serial, "exec-out", "screencap", "-p")
+}
+
+func (p *Provider) Reboot(ctx context.Context, d device.Device) error {
+	if d.Serial == "" {
+		return errors.New("device is not running")
+	}
+	if _, err := run(ctx, p.sdk.adb(), "-s", d.Serial, "reboot"); err != nil {
+		return err
+	}
+	p.waitDown(ctx, d.Serial)
+	return nil
+}
+
+// waitDown returns once adb stops reporting the device, so a caller that then waits for it to come
+// back does not pass straight through on the old connection that has not dropped yet.
+// The reboot has already been accepted at this point, so a device that never drops is not an error.
+func (p *Provider) waitDown(ctx context.Context, serial string) {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		out, err := run(ctx, p.sdk.adb(), "-s", serial, "get-state")
+		if err != nil || strings.TrimSpace(out) != "device" {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
 func run(ctx context.Context, bin string, args ...string) (string, error) {
+	out, err := runRaw(ctx, bin, args...)
+	return string(out), err
+}
+
+func runRaw(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%s %s: %w: %s", filepath.Base(bin), strings.Join(args, " "), err, tail(stderr.Bytes()))
+		return nil, fmt.Errorf("%s %s: %w: %s", filepath.Base(bin), strings.Join(args, " "), err, tail(stderr.Bytes()))
 	}
-	return string(out), nil
+	return out, nil
 }
 
 // start detaches the process so the emulator outlives the TUI and never blocks it.

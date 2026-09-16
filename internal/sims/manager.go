@@ -266,6 +266,30 @@ func (m *Manager) SendKey(ctx context.Context, d device.Device, key device.Key) 
 	return ks.SendKey(ctx, d, key)
 }
 
+func (m *Manager) Screenshot(ctx context.Context, d device.Device) ([]byte, error) {
+	p, err := m.provider(d)
+	if err != nil {
+		return nil, err
+	}
+	sc, ok := p.(device.Screenshotter)
+	if !ok {
+		return nil, fmt.Errorf("%s cannot capture a screen from here: %w", d.Platform, errors.ErrUnsupported)
+	}
+	return sc.Screenshot(ctx, d)
+}
+
+func (m *Manager) Reboot(ctx context.Context, d device.Device) error {
+	p, err := m.provider(d)
+	if err != nil {
+		return err
+	}
+	rb, ok := p.(device.Rebooter)
+	if !ok {
+		return fmt.Errorf("%s cannot reboot a device from here: %w", d.Platform, errors.ErrUnsupported)
+	}
+	return rb.Reboot(ctx, d)
+}
+
 func (m *Manager) CanEditHardware(platform device.Platform) bool {
 	_, ok := m.providers[platform].(device.HardwareEditor)
 	return ok

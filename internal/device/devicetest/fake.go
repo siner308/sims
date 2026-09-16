@@ -14,15 +14,16 @@ import (
 )
 
 type Fake struct {
-	ID           device.Platform
-	AvailableErr error
-	Devices      []device.Device
-	ListErr      error
-	AppList      []device.App
-	ImageList    []device.Image
-	Types        []device.DeviceType
-	HW           device.Hardware
-	LogCommand   *exec.Cmd
+	ID            device.Platform
+	AvailableErr  error
+	ScreenshotErr error
+	Devices       []device.Device
+	ListErr       error
+	AppList       []device.App
+	ImageList     []device.Image
+	Types         []device.DeviceType
+	HW            device.Hardware
+	LogCommand    *exec.Cmd
 
 	mu    sync.Mutex
 	Calls []string
@@ -135,6 +136,19 @@ func (f *Fake) Create(_ context.Context, name string, img device.Image, deviceTy
 
 func (f *Fake) DeviceTypes(context.Context) ([]device.DeviceType, error) {
 	return slices.Clone(f.Types), nil
+}
+
+func (f *Fake) Screenshot(_ context.Context, d device.Device) ([]byte, error) {
+	f.record("screenshot %s", d.ID)
+	if f.ScreenshotErr != nil {
+		return nil, f.ScreenshotErr
+	}
+	return []byte("\x89PNG\r\n\x1a\n" + d.ID), nil
+}
+
+func (f *Fake) Reboot(_ context.Context, d device.Device) error {
+	f.record("reboot %s", d.ID)
+	return nil
 }
 
 func (f *Fake) Checks(_ context.Context, emit func(device.Check)) {

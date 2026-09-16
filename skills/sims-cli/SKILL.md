@@ -43,6 +43,8 @@ sims device delete <device>                 # remove an AVD/simulator; on a phon
 sims device create <name> --image <image> [--type <type>] [--ram MB --cores N --disk GB] [--boot] [--timeout 3m]
 sims device hardware <device> [--ram MB --cores N --disk GB]   # AVD only; no flags prints current values
 sims device key <device> home|back|overview # android only
+sims device screenshot <device> [path]      # PNG; no path names it after the device and the time, - writes to stdout
+sims device reboot <device> [--wait] [--timeout 3m]   # simulator: shutdown and boot again
 sims device logs <device> [--app <bundle-or-name>]
 sims device connect <device>                # iPhone: open wifi tunnel; USB Android phone: switch to adb over wifi
 sims device connect <host:port>             # adb connect (20s limit)
@@ -78,7 +80,7 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 | `platform` | `android`, `ios` |
 | `kind` | `virtual`, `physical` |
 | `transport` | `avd`, `sim` (virtual); `usb`, `wifi` (physical) |
-| `state` | `Booted`, `Booting`, `Shutting Down`, `Shutdown`, `Unknown` (virtual); `Connected`, `Offline`, `Unauthorized`, `Unpaired` (physical) |
+| `state` | `Booted`, `Booting`, `Shutting Down`, `Shutdown`, `Unknown` (virtual); `Connected`, `Offline`, `Unauthorized`, `Unpaired` (physical). An Android emulator stays `Booting` until `sys.boot_completed`, so `Booted` means it will accept an install. |
 | `model` * | e.g. `iPhone 14 Pro`; empty for most AVDs |
 | `runtime` * | `API 36`, `iOS 26.5` |
 | `serial` * | adb serial while an Android device is reachable (`emulator-5554`, wifi `host:port`) |
@@ -104,6 +106,13 @@ sims device boot "$ID" --wait
 sims app install "$ID" app/build/outputs/apk/debug/app-debug.apk
 sims app launch "$ID" com.example.app
 timeout 60 sims app logs "$ID" com.example.app > app.log || [ $? -eq 124 ]
+```
+
+Look at what is on screen. A screenshot is the way to check an app that draws its own interface, since a Unity or Flutter canvas puts no text in the accessibility tree:
+
+```sh
+sims device screenshot "$ID" /tmp/screen.png   # then read the image
+sims device screenshot "$ID" - | <another command>
 ```
 
 Find a running device on either platform:
@@ -145,6 +154,8 @@ Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds
 | `no device matches "x"` | `sims device list --json` (with `--all` for never-booted simulators); names match exactly, so pick the `id`. |
 | `"x" matches N devices, use the id: ...` | Rerun with one of the listed ids. |
 | `device is not running` | `sims device boot <id> --wait`, or for a phone `sims device connect <id>`. |
+| `devicectl cannot capture a physical device's screen` | Screenshots work on emulators and simulators only. |
+| `<platform> cannot reboot a device from here` / `... capture a screen from here` | The platform has no such command; `sims device shutdown` then `boot` is the fallback. |
 | `<name> did not finish booting within 3m0s` | `sims device wait <id> --timeout 5m`; the first boot of a fresh image is slow. |
 | `shut down the device before erasing` / `... before deleting` | `sims device shutdown <id>` first. |
 | `<bundle> is not running; launch it first` | Android app logs filter by pid: `sims app launch` first, or use `sims device logs <id>` unfiltered. |

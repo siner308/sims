@@ -241,6 +241,16 @@ const (
 	KeyOverview Key = "overview"
 )
 
+// Screenshotter is implemented by providers that can capture a running device's screen as a PNG.
+type Screenshotter interface {
+	Screenshot(ctx context.Context, d Device) ([]byte, error)
+}
+
+// Rebooter is implemented by providers that can restart a device in place.
+type Rebooter interface {
+	Reboot(ctx context.Context, d Device) error
+}
+
 // Describer is implemented by providers that can report toolchain facts for the header.
 type Describer interface {
 	Info(ctx context.Context) [][2]string

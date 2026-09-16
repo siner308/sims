@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"sort"
@@ -150,6 +151,39 @@ func (p *Provider) Shutdown(ctx context.Context, d device.Device) error {
 	}
 	_, err := simctl(ctx, "shutdown", d.ID)
 	return err
+}
+
+func (p *Provider) Screenshot(ctx context.Context, d device.Device) ([]byte, error) {
+	if d.Kind == device.KindPhysical {
+		return nil, errors.New("devicectl cannot capture a physical device's screen")
+	}
+	if d.State != device.StateBooted {
+		return nil, errors.New("device is not running")
+	}
+	// simctl documents "-" as stdout but writes a file of that name instead (Xcode 26.6), so the
+	// image comes back through a temporary file; the .png extension is how simctl picks the format.
+	f, err := os.CreateTemp("", "sims-*.png")
+	if err != nil {
+		return nil, err
+	}
+	path := f.Name()
+	f.Close()
+	defer os.Remove(path)
+	if _, err := simctl(ctx, "io", d.ID, "screenshot", path); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// Reboot on a simulator is shutdown then boot: simctl has no reboot, and erase would take the data with it.
+func (p *Provider) Reboot(ctx context.Context, d device.Device) error {
+	if d.Kind == device.KindPhysical {
+		return devicectl(ctx, "device", "reboot", "--device", d.ID, "--quiet")
+	}
+	if _, err := simctl(ctx, "shutdown", d.ID); err != nil {
+		return err
+	}
+	return p.Boot(ctx, d)
 }
 
 func (p *Provider) Erase(ctx context.Context, d device.Device) error {

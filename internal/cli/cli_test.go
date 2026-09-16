@@ -179,7 +179,7 @@ func TestUsageErrorsPointAtHelp(t *testing.T) {
 	f := newFixture()
 	f.fails(t, "see 'sims device boot --help'", "device", "boot")
 	f.fails(t, `--platform must be android or ios, not "windows"`, "device", "list", "-p", "windows")
-	f.fails(t, "unknown command", "devices", "reboot")
+	f.fails(t, "unknown command", "devices", "defenestrate")
 }
 
 func TestDeviceBootWait(t *testing.T) {
@@ -360,6 +360,57 @@ func echoCmd(t *testing.T, line string) *exec.Cmd {
 		t.Skip("no echo on this machine")
 	}
 	return exec.Command("echo", line)
+}
+
+func TestDeviceScreenshot(t *testing.T) {
+	f := newFixture()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.png")
+	if out := f.ok(t, "device", "screenshot", "Pixel_7", path); !strings.Contains(out, "wrote "+path) {
+		t.Fatalf("screenshot printed %q", out)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !strings.HasSuffix(string(got), "Pixel_7") {
+		t.Fatalf("saved file: %v %q", err, got)
+	}
+	if out := f.ok(t, "device", "screenshot", "UDID-1", "-"); !strings.HasSuffix(out, "UDID-1") {
+		t.Fatalf("screenshot to stdout printed %q", out)
+	}
+
+	cwd, _ := os.Getwd()
+	t.Chdir(dir)
+	defer os.Chdir(cwd)
+	out := f.ok(t, "device", "screenshot", "iPhone 17", "--json")
+	var res struct {
+		Path  string `json:"path"`
+		Bytes int    `json:"bytes"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Bytes == 0 {
+		t.Fatalf("json screenshot: %v %s", err, out)
+	}
+	if strings.ContainsAny(res.Path, ` /\:`) || !strings.HasPrefix(res.Path, "iPhone_17-") {
+		t.Fatalf("default name %q should be filename-safe", res.Path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, res.Path)); err != nil {
+		t.Fatalf("default-named file: %v", err)
+	}
+
+	f.android.ScreenshotErr = errors.New("device is not running")
+	f.fails(t, "device is not running", "device", "screenshot", "Pixel_7", path)
+}
+
+func TestDeviceReboot(t *testing.T) {
+	f := newFixture()
+	if out := f.ok(t, "device", "reboot", "Pixel_7"); out != "rebooting Pixel_7\n" {
+		t.Fatalf("reboot printed %q", out)
+	}
+	if !f.android.Called("reboot Pixel_7") {
+		t.Fatalf("provider calls: %v", f.android.Calls)
+	}
+	f.android.SetState("Pixel_7", device.StateBooted, "emulator-5554")
+	if out := f.ok(t, "device", "reboot", "Pixel_7", "--wait"); out != "rebooted Pixel_7\n" {
+		t.Fatalf("reboot --wait printed %q", out)
+	}
 }
 
 func TestSkillPrintsTheEmbeddedFile(t *testing.T) {
