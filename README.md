@@ -183,6 +183,16 @@ sims app launch Pixel_7 com.example.app
 sims app logs Pixel_7 com.example.app
 ```
 
+### AI agents
+
+The binary carries a skill that teaches an AI coding agent the command line above: list and act by id, parse `--json`, bound the log streams, ask before `erase`, `delete` and `uninstall`, and what each message on stderr means. `install.sh` installs it for the agents it finds on the machine, `sims update` keeps the installed copies at the binary's version, and `sims skill install` does the same for a zip or `go install` build. Agents found: Claude Code (`~/.claude/skills`) and anything that reads `~/.agents/skills` (Codex among them); `--dir` names another skills directory, and `sims skill` prints the file for anything else. The source is [`skills/sims-cli/SKILL.md`](skills/sims-cli/SKILL.md).
+
+```sh
+sims skill install                      # ~/.claude/skills/sims-cli and ~/.agents/skills/sims-cli, whichever agents exist
+sims skill install --dir .claude/skills # into this project, so the checkout carries it
+sims skill > SKILL.md                   # for any other agent
+```
+
 ## Keys
 
 | Scope | Key | Action |

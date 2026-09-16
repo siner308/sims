@@ -61,5 +61,10 @@ case ":$PATH:" in
   *) echo "add $INSTALL_DIR to your PATH, e.g. export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
 
+# The agent skill goes where the AI coding agents on this machine look; `sims skill install` for the details.
+if [ -d "$HOME/.claude" ] || [ -d "$HOME/.agents" ]; then
+  "$INSTALL_DIR/sims" skill install || true
+fi
+
 echo
 "$INSTALL_DIR/sims" doctor || true

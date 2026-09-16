@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/siner308/sims/internal/device"
 	"github.com/siner308/sims/internal/device/devicetest"
 	"github.com/siner308/sims/internal/sims"
+	"github.com/siner308/sims/skills"
 )
 
 var (
@@ -357,4 +360,47 @@ func echoCmd(t *testing.T, line string) *exec.Cmd {
 		t.Skip("no echo on this machine")
 	}
 	return exec.Command("echo", line)
+}
+
+func TestSkillPrintsTheEmbeddedFile(t *testing.T) {
+	f := newFixture()
+	if out := f.ok(t, "skill"); out != skills.SimsCLI || !strings.HasPrefix(out, "---\nname: sims-cli\n") {
+		t.Fatalf("skill printed %q", out[:min(len(out), 60)])
+	}
+}
+
+func TestSkillInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	f := newFixture()
+	f.fails(t, "no agent found", "skill", "install")
+
+	os.Mkdir(filepath.Join(home, ".claude"), 0o755)
+	claude := filepath.Join(home, ".claude", "skills", "sims-cli", "SKILL.md")
+	if out := f.ok(t, "skill", "install"); out != "Claude Code: written ("+claude+")\n" {
+		t.Fatalf("first install printed %q", out)
+	}
+	if got, err := os.ReadFile(claude); err != nil || string(got) != skills.SimsCLI {
+		t.Fatalf("installed copy: %v", err)
+	}
+	if out := f.ok(t, "skill", "install"); !strings.Contains(out, "up to date") {
+		t.Fatalf("second install printed %q", out)
+	}
+
+	os.Mkdir(filepath.Join(home, ".agents"), 0o755)
+	os.WriteFile(claude, []byte("stale"), 0o644)
+	out := f.ok(t, "skill", "install", "--refresh", "--json")
+	var results []map[string]string
+	if err := json.Unmarshal([]byte(out), &results); err != nil || len(results) != 1 || results[0]["result"] != "written" {
+		t.Fatalf("refresh: %v %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents", "skills")); !os.IsNotExist(err) {
+		t.Fatal("refresh created a copy for a new agent")
+	}
+
+	dir := t.TempDir()
+	if out := f.ok(t, "skill", "install", "--dir", dir); !strings.HasPrefix(out, dir+": written (") {
+		t.Fatalf("--dir printed %q", out)
+	}
 }

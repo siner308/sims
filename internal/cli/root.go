@@ -72,7 +72,7 @@ func New(o Options) *cobra.Command {
 	root.SetErr(c.Err)
 	root.PersistentFlags().StringVarP(&c.platform, "platform", "p", "", "only look at one platform: android or ios")
 	root.PersistentFlags().BoolVar(&c.json, "json", false, "print the result as JSON")
-	root.AddCommand(c.deviceCmd(), c.appCmd(), c.imageCmd(), c.deviceTypeCmd(), c.doctorCmd(), c.updateCmd())
+	root.AddCommand(c.deviceCmd(), c.appCmd(), c.imageCmd(), c.deviceTypeCmd(), c.doctorCmd(), c.updateCmd(), c.skillCmd())
 	return root
 }
 

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -268,5 +269,16 @@ func Run(ctx context.Context, current string, checkOnly bool, w io.Writer) error
 		return err
 	}
 	fmt.Fprintf(w, "updated to %s\n", latest)
+	RefreshSkill(ctx, target, w)
 	return nil
+}
+
+// RefreshSkill runs the binary just written to target, because the skill text lives in that binary and the running process still holds the old one.
+// Failing to refresh is reported and not returned: the update itself has already happened.
+func RefreshSkill(ctx context.Context, target string, w io.Writer) {
+	cmd := exec.CommandContext(ctx, target, "skill", "install", "--refresh")
+	cmd.Stdout, cmd.Stderr = w, w
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(w, "could not refresh the installed agent skill: %v (run: sims skill install)\n", err)
+	}
 }

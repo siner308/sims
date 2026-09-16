@@ -53,7 +53,11 @@ func runTUI(v string, m *sims.Manager) error {
 			if err != nil {
 				return err
 			}
-			return u.Apply(ctx, tag, target)
+			if err := u.Apply(ctx, tag, target); err != nil {
+				return err
+			}
+			update.RefreshSkill(ctx, target, io.Discard)
+			return nil
 		})
 	}
 	return app.Run()
