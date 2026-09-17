@@ -248,8 +248,43 @@ func (p *Provider) Apps(ctx context.Context, d device.Device) ([]device.App, err
 		}
 		apps = append(apps, device.App{BundleID: a.BundleID, Name: name, Version: a.Version, System: a.Type != "User", Source: source, Process: a.Executable})
 	}
-	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
+	if running, err := p.runningBundles(ctx, d); err == nil {
+		for i := range apps {
+			apps[i].Running = running[apps[i].BundleID]
+		}
+	}
+	sort.Slice(apps, func(i, j int) bool {
+		if apps[i].Running != apps[j].Running {
+			return apps[i].Running
+		}
+		return apps[i].Name < apps[j].Name
+	})
 	return apps, nil
+}
+
+// launchctl keeps a job per app as "UIKitApplication:<bundle id>[...]", and a job that has never
+// run or has exited keeps its label with "-" where the pid goes.
+func (p *Provider) runningBundles(ctx context.Context, d device.Device) (map[string]bool, error) {
+	out, err := simctl(ctx, "spawn", d.ID, "launchctl", "list")
+	if err != nil {
+		return nil, err
+	}
+	running := map[string]bool{}
+	for _, l := range strings.Split(out, "\n") {
+		fields := strings.Fields(l)
+		if len(fields) < 3 || fields[0] == "-" {
+			continue
+		}
+		label, ok := strings.CutPrefix(fields[2], "UIKitApplication:")
+		if !ok {
+			continue
+		}
+		if i := strings.IndexByte(label, '['); i >= 0 {
+			label = label[:i]
+		}
+		running[label] = true
+	}
+	return running, nil
 }
 
 func (p *Provider) InstallApp(ctx context.Context, d device.Device, path string) error {

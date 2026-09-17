@@ -217,8 +217,34 @@ func (p *Provider) Apps(ctx context.Context, d device.Device) ([]device.App, err
 		_, isUser := user[pkg]
 		apps = append(apps, device.App{BundleID: pkg, Name: pkg, System: !isUser, Source: sourceOf(isUser, e.installer)})
 	}
+	if running, err := p.runningPackages(ctx, d.Serial); err == nil {
+		for i := range apps {
+			apps[i].Running = running[apps[i].BundleID]
+		}
+	}
 	p.enrichLabels(ctx, d.Serial, apps, all)
 	return apps, nil
+}
+
+// An Android app's process is named after its package unless the manifest renames it, so a package
+// with no process of its own reads as not running even when it has a service alive under another name.
+func (p *Provider) runningPackages(ctx context.Context, serial string) (map[string]bool, error) {
+	out, err := run(ctx, p.sdk.adb(), "-s", serial, "shell", "ps", "-A", "-o", "NAME")
+	if err != nil {
+		return nil, err
+	}
+	running := map[string]bool{}
+	for _, l := range lines(out) {
+		name := strings.TrimSpace(l)
+		// A renamed process is "<package>:<suffix>"; the package in front is what identifies the app.
+		if pkg, _, found := strings.Cut(name, ":"); found {
+			name = pkg
+		}
+		if name != "" && name != "NAME" {
+			running[name] = true
+		}
+	}
+	return running, nil
 }
 
 // Preinstalled apps stay as package names: pulling a few hundred system APKs would take minutes,

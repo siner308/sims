@@ -159,7 +159,7 @@ sims device pair <device>                   # iPhone: devicectl manage pair (acc
 sims device pair <host:port> <code>         # Android 11+ wireless debugging
 sims device disconnect <device>             # adb disconnect
 
-sims app list <device> [--all]              # --all includes preinstalled apps
+sims app list <device> [--all]              # --all includes preinstalled apps; running apps sort first
 sims app install <device> <path>            # .apk or .app
 sims app uninstall | launch <device> <bundle>
 sims app logs <device> <bundle>             # android: the app must be running (logcat --pid)

@@ -140,8 +140,70 @@ func (p *Provider) physicalApps(ctx context.Context, d device.Device) ([]device.
 			all[i].Source = "preinstalled"
 		}
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
+	running, err := p.runningApps(ctx, d)
+	if err == nil {
+		for i := range all {
+			all[i].Running = running[all[i].Name]
+		}
+		// devicectl answers "success" with an empty list on a phone that is plainly running its
+		// apps, and the process list is the one enumeration that still works, so it stands in.
+		// iOS 27 puts Apple's own apps under the same container path as third-party ones, so an
+		// entry from here carries no system/user split and every one of them is listed.
+		if len(all) == 0 {
+			for name := range running {
+				all = append(all, device.App{Name: name, Running: true, Source: "process"})
+			}
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].Running != all[j].Running {
+			return all[i].Running
+		}
+		return all[i].Name < all[j].Name
+	})
 	return all, nil
+}
+
+func (p *Provider) runningApps(ctx context.Context, d device.Device) (map[string]bool, error) {
+	raw, err := devicectlJSON(ctx, "device", "info", "processes", "--device", d.ID)
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Result struct {
+			RunningProcesses []struct {
+				Executable string `json:"executable"`
+			} `json:"runningProcesses"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	apps := map[string]bool{}
+	for _, proc := range payload.Result.RunningProcesses {
+		name, ok := appBundleName(proc.Executable)
+		if !ok {
+			continue
+		}
+		// An extension runs inside its host app's bundle; the host is what belongs in the list.
+		if strings.Contains(proc.Executable, ".appex/") {
+			continue
+		}
+		apps[name] = true
+	}
+	return apps, nil
+}
+
+func appBundleName(executable string) (string, bool) {
+	i := strings.Index(executable, ".app/")
+	if i < 0 {
+		return "", false
+	}
+	head := executable[:i]
+	if j := strings.LastIndexByte(head, '/'); j >= 0 {
+		head = head[j+1:]
+	}
+	return head, head != ""
 }
 
 func (p *Provider) devicectlApps(ctx context.Context, d device.Device, flags ...string) ([]device.App, error) {

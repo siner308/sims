@@ -94,6 +94,7 @@ type App struct {
 	System   bool   `json:"system"`            // shipped with the image (system partition / Apple built-in)
 	Source   string `json:"source,omitempty"`  // who installed it: "preinstalled", "store", "adb", "simctl", or "" when unknown
 	Process  string `json:"process,omitempty"` // executable name as the OS logger reports it; empty when unknown
+	Running  bool   `json:"running"`
 }
 
 // ProcessName is what log filters match on; the display name is the fallback when the executable is unknown.

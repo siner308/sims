@@ -362,6 +362,26 @@ func echoCmd(t *testing.T, line string) *exec.Cmd {
 	return exec.Command("echo", line)
 }
 
+func TestAppList_EmptyOnAPhoneSaysWhy(t *testing.T) {
+	f := newFixture()
+	f.ios.Devices = append(f.ios.Devices, device.Device{
+		ID: "PHONE-1", Name: "my iPhone", Platform: device.PlatformIOS,
+		Kind: device.KindPhysical, Transport: device.TransportWiFi, State: device.StateConnected,
+	})
+	f.ios.AppList = nil
+	if out := f.ok(t, "app", "list", "PHONE-1"); !strings.Contains(out, "BUNDLE ID") {
+		t.Fatalf("stdout should still hold the header: %q", out)
+	}
+	if !strings.Contains(f.err.String(), "devicectl listed no apps on my iPhone") {
+		t.Fatalf("stderr %q", f.err.String())
+	}
+
+	f = newFixture()
+	if f.ok(t, "app", "list", "Pixel_7"); strings.Contains(f.err.String(), "devicectl") {
+		t.Fatalf("an android device should not get the devicectl note: %q", f.err.String())
+	}
+}
+
 func TestDeviceScreenshot(t *testing.T) {
 	f := newFixture()
 	dir := t.TempDir()

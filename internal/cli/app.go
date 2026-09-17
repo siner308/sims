@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -34,12 +36,32 @@ func (c *cli) appListCmd() *cobra.Command {
 			if !all {
 				apps = slices.DeleteFunc(apps, func(a device.App) bool { return a.System })
 			}
+			slices.SortStableFunc(apps, func(x, y device.App) int {
+				if x.Running != y.Running {
+					if x.Running {
+						return -1
+					}
+					return 1
+				}
+				return strings.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name))
+			})
+			// devicectl answers "success" with an empty list, so without this note an empty table
+			// reads as sims having swallowed an error. It comes back empty on a phone that is
+			// unlocked and plainly running the apps, so the note points elsewhere rather than
+			// naming a cause: everything else about the device keeps working.
+			if len(apps) == 0 && d.Platform == device.PlatformIOS && d.Kind == device.KindPhysical {
+				fmt.Fprintf(c.Err, "devicectl listed no apps on %s. It reports only developer apps and returns nothing on some phones even when apps are installed; a USB connection is worth a try. Logs and the other device commands are unaffected.\n", d.Name)
+			}
 			if c.json {
 				return c.printJSON(apps)
 			}
-			t := c.table("NAME", "BUNDLE ID", "VERSION", "SOURCE")
+			t := c.table("NAME", "BUNDLE ID", "VERSION", "STATE", "SOURCE")
 			for _, a := range apps {
-				t.row(a.Name, a.BundleID, a.Version, a.Source)
+				state := ""
+				if a.Running {
+					state = "running"
+				}
+				t.row(a.Name, a.BundleID, a.Version, state, a.Source)
 			}
 			return t.flush()
 		}),

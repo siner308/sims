@@ -52,7 +52,7 @@ sims device pair <device>                   # iPhone over USB; user must accept 
 sims device pair <host:port> <code>         # Android 11+ wireless debugging
 sims device disconnect <device>             # adb disconnect
 
-sims app list <device> [--all]              # --all includes system/preinstalled apps
+sims app list <device> [--all]              # --all includes system/preinstalled apps; running apps sort first
 sims app install <device> <path>            # .apk (android) or .app bundle (ios simulator)
 sims app uninstall <device> <bundle-id>     # no confirmation
 sims app launch <device> <bundle-id>
@@ -86,7 +86,9 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 | `serial` * | adb serial while an Android device is reachable (`emulator-5554`, wifi `host:port`) |
 | `lastActiveAt` * | RFC 3339; last boot or last connection |
 
-`app list`: `bundleId`, `name`, `version`*, `system` (bool), `source`* (`preinstalled`, `store`, `adb`, `simctl`), `process`*.
+`app list`: `bundleId`, `name`, `version`*, `system` (bool), `running` (bool), `source`* (`preinstalled`, `store`, `adb`, `simctl`, `process`), `process`*. Running apps sort first, then by name.
+
+On a physical iPhone devicectl often lists no apps at all, even unlocked with apps plainly running. sims falls back to the running processes there, which is why those entries carry `"source": "process"`, a name and no `bundleId`. Commands that need a bundle id do not work on them.
 
 `image list`: `id` (`system-images;android-36;google_apis_playstore;arm64-v8a` or `com.apple.CoreSimulator.SimRuntime.iOS-26-5`), `name`, `version`* (`36`, `26.5`), `installed`, `os`*, `platform`.
 
