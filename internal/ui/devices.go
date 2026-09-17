@@ -315,15 +315,12 @@ func (v *devicesView) openApps() {
 	if !ok {
 		return
 	}
-	if d.Running() {
+	if d.Reachable() {
 		v.app.push(newAppsView(v.app, d))
 		return
 	}
 	if d.Kind != device.KindVirtual {
 		hint := "plug it in or connect it first"
-		if d.Platform == device.PlatformIOS && d.State == device.StateOffline {
-			hint = "press w to open the wifi tunnel"
-		}
 		if d.Platform == device.PlatformIOS && d.State == device.StateUnpaired {
 			hint = "press p to pair it (USB the first time)"
 		}

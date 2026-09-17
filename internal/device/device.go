@@ -82,6 +82,16 @@ func (d Device) Running() bool {
 	return d.State == StateBooted || d.State == StateConnected
 }
 
+// Reachable reports whether a command can be sent to the device as it stands. CoreDevice drops the
+// wifi tunnel to an idle iPhone, which shows as Offline, and reopens it for whatever command comes
+// next, so a paired phone is reachable there while a stopped virtual device is not.
+func (d Device) Reachable() bool {
+	if d.Kind == KindPhysical && d.Platform == PlatformIOS {
+		return d.State != StateUnpaired
+	}
+	return d.Running()
+}
+
 // NeverBooted marks a simulator that has never run: a stock Xcode lists dozens, so listings hide them by default.
 func (d Device) NeverBooted() bool {
 	return d.Platform == PlatformIOS && d.Kind == KindVirtual && d.LastActiveAt.IsZero() && !d.Running()

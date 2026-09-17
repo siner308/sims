@@ -129,14 +129,14 @@ func TestDeviceTypeSupports(t *testing.T) {
 }
 
 func TestReachable(t *testing.T) {
-	offline := device.Device{ID: "UDID", Kind: device.KindPhysical, State: device.StateOffline}
+	offline := device.Device{ID: "UDID", Platform: device.PlatformIOS, Kind: device.KindPhysical, State: device.StateOffline}
 	if err := reachable(offline); err != nil {
 		t.Fatalf("an offline phone is a closed tunnel, not an unreachable device: %v", err)
 	}
-	if err := reachable(device.Device{ID: "UDID", State: device.StateConnected}); err != nil {
+	if err := reachable(device.Device{ID: "UDID", Platform: device.PlatformIOS, Kind: device.KindPhysical, State: device.StateConnected}); err != nil {
 		t.Fatalf("connected: %v", err)
 	}
-	err := reachable(device.Device{ID: "UDID", State: device.StateUnpaired})
+	err := reachable(device.Device{ID: "UDID", Platform: device.PlatformIOS, Kind: device.KindPhysical, State: device.StateUnpaired})
 	if err == nil || !strings.Contains(err.Error(), "sims device pair UDID") {
 		t.Fatalf("unpaired should name the pair command, got %v", err)
 	}

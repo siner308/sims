@@ -662,16 +662,34 @@ func TestDevicesView_WOnIOSPhoneConnects(t *testing.T) {
 	dv := a.stack[0].(*devicesView)
 	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 })
 
+	// Offline is CoreDevice letting an idle tunnel go, and the next command reopens it, so enter
+	// opens the apps of a paired phone instead of sending the user to w first.
+	onUI(a, func() { dv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)) })
+	waitFor(t, a, 2*time.Second, func() bool { return a.stack[len(a.stack)-1].Name() == "apps" })
+	onUI(a, func() { a.pop() })
+
+	onUI(a, func() { dv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone)) })
+	waitFor(t, a, 2*time.Second, func() bool { return cp.connected.Load() == 1 })
+}
+
+func TestDevicesView_EnterOnAnUnpairedIPhonePointsAtPairing(t *testing.T) {
+	cp := &connectProvider{fakeProvider: fakeProvider{platform: device.PlatformIOS, devices: []device.Device{
+		{ID: "BBBB", Name: "my iphone", Platform: device.PlatformIOS, Kind: device.KindPhysical, Transport: device.TransportUSB, State: device.StateUnpaired},
+	}}}
+	a := New("test", sims.New(cp))
+	_, stop := runHeadless(t, a)
+	defer stop()
+	dv := a.stack[0].(*devicesView)
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 })
+
 	var status string
 	onUI(a, func() {
 		dv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
 		status = a.status.GetText(true)
 	})
-	if !strings.Contains(status, "press w") {
-		t.Errorf("enter on an offline iphone should point at w, got %q", status)
+	if !strings.Contains(status, "press p") {
+		t.Errorf("enter on an unpaired iphone should point at p, got %q", status)
 	}
-	onUI(a, func() { dv.onKey(tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModNone)) })
-	waitFor(t, a, 2*time.Second, func() bool { return cp.connected.Load() == 1 })
 }
 
 func TestRenderHints_DropsWholeColumnsThatDoNotFit(t *testing.T) {
