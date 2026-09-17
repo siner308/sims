@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -121,16 +122,16 @@ func TestCompletePath(t *testing.T) {
 func TestInstallableExts(t *testing.T) {
 	cases := []struct {
 		d    device.Device
-		want string
+		want []string
 	}{
-		{device.Device{Platform: device.PlatformAndroid, Kind: device.KindVirtual}, ".apk"},
-		{device.Device{Platform: device.PlatformAndroid, Kind: device.KindPhysical}, ".apk"},
-		{device.Device{Platform: device.PlatformIOS, Kind: device.KindVirtual}, ".app"},
-		{device.Device{Platform: device.PlatformIOS, Kind: device.KindPhysical}, ".app"},
+		{device.Device{Platform: device.PlatformAndroid, Kind: device.KindVirtual}, []string{".apk"}},
+		{device.Device{Platform: device.PlatformAndroid, Kind: device.KindPhysical}, []string{".apk"}},
+		{device.Device{Platform: device.PlatformIOS, Kind: device.KindVirtual}, []string{".app", ".ipa"}},
+		{device.Device{Platform: device.PlatformIOS, Kind: device.KindPhysical}, []string{".app"}},
 	}
 	for _, c := range cases {
-		if got := installableExts(c.d)[0]; got != c.want {
-			t.Errorf("%s/%s first ext = %q, want %q", c.d.Platform, c.d.Kind, got, c.want)
+		if got := installableExts(c.d); !slices.Equal(got, c.want) {
+			t.Errorf("%s/%s exts = %v, want %v", c.d.Platform, c.d.Kind, got, c.want)
 		}
 	}
 }

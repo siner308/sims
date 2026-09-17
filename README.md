@@ -160,7 +160,7 @@ sims device pair <host:port> <code>         # Android 11+ wireless debugging
 sims device disconnect <device>             # adb disconnect
 
 sims app list <device> [--all]              # --all includes preinstalled apps; running apps sort first
-sims app install <device> <path>            # .apk or .app
+sims app install <device> <path>            # .apk on android; .app or .ipa on a simulator; .app on an iPhone. A device-built ipa is refused for a simulator, which installs one and then cannot launch it
 sims app uninstall | launch <device> <bundle>
 sims app logs <device> <bundle>             # android: the app must be running (logcat --pid)
 

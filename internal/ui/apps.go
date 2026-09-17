@@ -181,10 +181,13 @@ func (v *appsView) pickAndInstall(native bool) {
 	}()
 }
 
-// devicectl's install help names only .app bundles, the same unit simctl installs, so both iOS kinds take .app.
+// devicectl's install help names only .app bundles, while simctl takes a packaged .ipa as well.
 func installableExts(d device.Device) []string {
-	if d.Platform == device.PlatformAndroid {
+	switch {
+	case d.Platform == device.PlatformAndroid:
 		return []string{".apk"}
+	case d.Kind == device.KindVirtual:
+		return []string{".app", ".ipa"}
 	}
 	return []string{".app"}
 }

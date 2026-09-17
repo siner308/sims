@@ -53,7 +53,7 @@ sims device pair <host:port> <code>         # Android 11+ wireless debugging
 sims device disconnect <device>             # adb disconnect
 
 sims app list <device> [--all]              # --all includes system/preinstalled apps; running apps sort first
-sims app install <device> <path>            # .apk (android) or .app bundle (ios simulator)
+sims app install <device> <path>            # .apk (android); .app or .ipa on a simulator; .app on an iPhone
 sims app uninstall <device> <bundle-id>     # no confirmation
 sims app launch <device> <bundle-id>
 sims app logs <device> <bundle-id-or-name>  # android: the app must already be running
@@ -162,6 +162,7 @@ Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds
 | `shut down the device before erasing` / `... before deleting` | `sims device shutdown <id>` first. |
 | `<bundle> is not running; launch it first` | Android app logs filter by pid: `sims app launch` first, or use `sims device logs <id>` unfiltered. |
 | `<bundle> has no launcher activity` | The package is a library or service; nothing to launch. |
+| `<file> is built for a real iPhone, which a simulator cannot run` | An ad-hoc or App Store `.ipa` holds a device binary. Build against the simulator SDK for a simulator, or install the file on a phone. |
 | `<image> is not installed; run sims image install ...` | Android: run that. iOS: `xcodebuild -downloadPlatform iOS`, then retry. |
 | `no device type runs <image>; pass --type` | `sims device-type list --image <image>` and pick one. |
 | `ios cannot send <key> from here` / `<name> has no editable hardware` | Android-only feature; on iOS use the simulator window or Xcode. |

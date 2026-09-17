@@ -294,6 +294,11 @@ func (p *Provider) InstallApp(ctx context.Context, d device.Device, path string)
 	if d.Kind == device.KindPhysical {
 		return devicectl(ctx, "device", "install", "app", "--device", d.ID, path)
 	}
+	// simctl takes a device build and reports success, leaving an app that fails to launch with a
+	// SpringBoard error naming no cause, so the mismatch is caught here instead.
+	if DeviceOnlyBuild(path) {
+		return deviceBuildError(path)
+	}
 	_, err := simctl(ctx, "install", d.ID, path)
 	return err
 }
