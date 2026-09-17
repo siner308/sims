@@ -241,12 +241,22 @@ func (p *Provider) PairDevice(ctx context.Context, d device.Device) error {
 
 // CoreDevice opens the wifi tunnel lazily: any command addressed to the device brings it from
 // "disconnected" to "connected", and a cheap read is enough to trigger that.
+// reachable reports whether a command may be sent to a paired phone. CoreDevice drops the wifi
+// tunnel when it goes idle, which shows as Offline, and reopens it for whatever command comes next,
+// so only an unpaired phone is genuinely out of reach.
+func reachable(d device.Device) error {
+	if d.State == device.StateUnpaired {
+		return errors.New("pair the device first: sims device pair " + d.ID)
+	}
+	return nil
+}
+
 func (p *Provider) Connect(ctx context.Context, d device.Device) error {
 	if d.Kind != device.KindPhysical {
 		return errors.New("only physical devices connect this way")
 	}
-	if d.State == device.StateUnpaired {
-		return errors.New("pair the device first (p)")
+	if err := reachable(d); err != nil {
+		return err
 	}
 	return devicectl(ctx, "device", "info", "details", "--device", d.ID, "--timeout", "60", "--quiet")
 }

@@ -208,11 +208,14 @@ func (p *Provider) Delete(ctx context.Context, d device.Device) error {
 }
 
 func (p *Provider) Apps(ctx context.Context, d device.Device) ([]device.App, error) {
+	if d.Kind == device.KindPhysical {
+		if err := reachable(d); err != nil {
+			return nil, err
+		}
+		return p.physicalApps(ctx, d)
+	}
 	if !d.Running() {
 		return nil, errors.New("device is not running")
-	}
-	if d.Kind == device.KindPhysical {
-		return p.physicalApps(ctx, d)
 	}
 	raw, err := simctl(ctx, "listapps", d.ID)
 	if err != nil {
@@ -312,11 +315,14 @@ func (p *Provider) LaunchApp(ctx context.Context, d device.Device, bundleID stri
 }
 
 func (p *Provider) LogCmd(ctx context.Context, d device.Device, app *device.App) (*exec.Cmd, error) {
+	if d.Kind == device.KindPhysical {
+		if err := reachable(d); err != nil {
+			return nil, err
+		}
+		return physicalLogCmd(ctx, d, app)
+	}
 	if !d.Running() {
 		return nil, errors.New("device is not running")
-	}
-	if d.Kind == device.KindPhysical {
-		return physicalLogCmd(ctx, d, app)
 	}
 	args := []string{"simctl", "spawn", d.ID, "log", "stream", "--style", "compact"}
 	if app != nil {

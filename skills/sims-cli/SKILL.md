@@ -22,7 +22,7 @@ A bare `sims` opens an interactive terminal UI, so always give a subcommand.
 ## How to work
 
 1. **List first, then act by id.** Run `sims device list --json` (`-p android` or `-p ios` narrows it) and pick the `id`. Lookup by `name` is an exact, case-insensitive match: `pixel` does not find `Pixel_7`. When a name matches two devices the command fails and prints both ids.
-2. **Read state before acting.** A device is usable when `state` is `Booted` (virtual) or `Connected` (physical). `app *`, `logs` and `key` fail with `device is not running` on a `Shutdown` device, so boot it first with `--wait`.
+2. **Read state before acting.** A virtual device is usable at `Booted`; `app *`, `logs` and `key` fail with `device is not running` on a `Shutdown` one, so boot it first with `--wait`. A paired iPhone works at `Offline` too: that state means CoreDevice let the idle wifi tunnel go, and the next command reopens it, so `sims device connect` is for opening the tunnel on purpose, not a prerequisite.
 3. **Pass `--json` and parse it** rather than reading the table. The record shapes are below.
 4. **Ask before `erase`, `delete` and `uninstall`.** sims does not confirm; these act at once. Say what will be lost and wait for the user unless they asked for exactly that.
 5. **Bound anything that streams or waits.** `device logs` and `app logs` run until killed, so run them under `timeout 30 ...` (GNU coreutils; on macOS `brew install coreutils`) or in the background with output redirected to a file and kill them after. `timeout` exits 124 when it cuts the stream, which is the normal end of a capture, so a script under `set -e` treats 124 as success. `boot --wait`, `wait` and `create --boot` block up to `--timeout` (default 3m). `image install` takes minutes. `device pair <iphone>` waits up to 2 minutes for the user to tap Trust on the phone, so tell them before running it.
@@ -80,7 +80,7 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 | `platform` | `android`, `ios` |
 | `kind` | `virtual`, `physical` |
 | `transport` | `avd`, `sim` (virtual); `usb`, `wifi` (physical) |
-| `state` | `Booted`, `Booting`, `Shutting Down`, `Shutdown`, `Unknown` (virtual); `Connected`, `Offline`, `Unauthorized`, `Unpaired` (physical). An Android emulator stays `Booting` until `sys.boot_completed`, so `Booted` means it will accept an install. |
+| `state` | `Booted`, `Booting`, `Shutting Down`, `Shutdown`, `Unknown` (virtual); `Connected`, `Offline`, `Unauthorized`, `Unpaired` (physical). An Android emulator stays `Booting` until `sys.boot_completed`, so `Booted` means it will accept an install. An `Offline` iPhone still takes commands. |
 | `model` * | e.g. `iPhone 14 Pro`; empty for most AVDs |
 | `runtime` * | `API 36`, `iOS 26.5` |
 | `serial` * | adb serial while an Android device is reachable (`emulator-5554`, wifi `host:port`) |
@@ -165,7 +165,7 @@ Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds
 | `<image> is not installed; run sims image install ...` | Android: run that. iOS: `xcodebuild -downloadPlatform iOS`, then retry. |
 | `no device type runs <image>; pass --type` | `sims device-type list --image <image>` and pick one. |
 | `ios cannot send <key> from here` / `<name> has no editable hardware` | Android-only feature; on iOS use the simulator window or Xcode. |
-| `pair the device first` / state `Unpaired` | `sims device pair <id>` with the iPhone on USB; the user taps Trust. |
+| `pair the device first: sims device pair <id>` | Run that with the iPhone on USB; the user taps Trust. |
 | state `Unauthorized` | The Android phone shows an "Allow USB debugging" prompt; the user must accept it. |
 | `missing adb` / `xcrun not found` / `idevicesyslog not found` | `sims doctor` for the full picture; install what it lists (`brew install libimobiledevice` for iPhone logs). |
 | `this build cannot update itself` | Installed with `go install`; rerun the install line or `go install ...@latest`. |

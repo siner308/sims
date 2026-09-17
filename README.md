@@ -153,7 +153,7 @@ sims device key <device> home|back|overview # android only; a simulator takes ke
 sims device screenshot <device> [path]      # PNG; no path names it after the device and the time, - writes it to stdout
 sims device reboot <device> [--wait] [--timeout 3m]   # a simulator shuts down and boots again, since simctl has no reboot
 sims device logs <device> [--app <bundle>]
-sims device connect <device>                # iPhone: open the wifi tunnel; USB Android phone: switch to adb over wifi
+sims device connect <device>                # iPhone: open the wifi tunnel (idle drops it to Offline, and any command reopens it); USB Android phone: switch to adb over wifi
 sims device connect <host:port>             # adb connect
 sims device pair <device>                   # iPhone: devicectl manage pair (accept the prompt on the phone)
 sims device pair <host:port> <code>         # Android 11+ wireless debugging
