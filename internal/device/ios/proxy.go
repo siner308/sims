@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
@@ -178,12 +179,13 @@ func writeProfile(t device.ProxyTarget) (string, func(), error) {
 	}
 	data := profileData{
 		Identifier: profileIdentifier,
-		CertName:   t.CertName,
+		CertName:   xmlEscape(t.CertName),
 		CertBase64: base64.StdEncoding.EncodeToString(t.CACertDER),
 		Host:       t.Host,
 		Port:       t.Port,
 		Addr:       t.Addr(),
-		SSID:       t.SSID,
+		// a wifi name is whatever its owner typed; & or < would otherwise make the plist unparseable
+		SSID: xmlEscape(t.SSID),
 	}
 	var err error
 	if data.ProfileUUID, err = uuid(); err != nil {
@@ -214,6 +216,14 @@ func writeProfile(t device.ProxyTarget) (string, func(), error) {
 		return "", nil, err
 	}
 	return path, func() { os.Remove(path) }, nil
+}
+
+func xmlEscape(s string) string {
+	var b strings.Builder
+	if err := xml.EscapeText(&b, []byte(s)); err != nil {
+		return s
+	}
+	return b.String()
 }
 
 func shortHash(b []byte) string {

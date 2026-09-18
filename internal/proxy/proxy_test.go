@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -525,5 +527,116 @@ func TestUpstreamCertificateIsVerified(t *testing.T) {
 	last := flows[len(flows)-1]
 	if last.Error == "" {
 		t.Error("the flow does not record why the upstream was refused")
+	}
+}
+
+// A response the proxy could not finish relaying must reach the client as a broken connection. A
+// truncated body under a 200 would have the app under test see something that never happened.
+func TestTruncatedResponseBreaksTheConnection(t *testing.T) {
+	// the handler promises more than it sends, then drops the connection
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "1000")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("only a few bytes"))
+		http.NewResponseController(w).Flush()
+		panic(http.ErrAbortHandler)
+	}))
+	defer upstream.Close()
+
+	_, client := start(t)
+	resp, err := client.Get(upstream.URL + "/short")
+	if err != nil {
+		return // refused outright, which is also a broken connection
+	}
+	_, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr == nil {
+		t.Error("the client read a truncated body as if the response were complete")
+	}
+}
+
+// Stopping a capture has to stop the relaying too. net/http's Shutdown does not touch hijacked
+// connections, and every CONNECT is hijacked, so a tunnel outlived the session that owned it.
+func TestCloseEndsAnOpenTunnel(t *testing.T) {
+	// an upstream that holds the connection open without answering
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+
+	ca, err := proxy.LoadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &proxy.Server{CA: ca, Store: proxy.NewStore(0)}
+	port, err := srv.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve()
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", ln.Addr(), ln.Addr())
+	buf := make([]byte, 64)
+	if _, err := conn.Read(buf); err != nil {
+		t.Fatalf("no CONNECT response: %v", err)
+	}
+
+	srv.Close()
+
+	// the tunnel must now be gone rather than still relaying
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Read(buf); err == nil {
+		t.Error("the tunnel was still open after the capture closed")
+	} else if strings.Contains(err.Error(), "i/o timeout") {
+		t.Error("the tunnel outlived Close: it is still holding the connection")
+	}
+}
+
+// The CA key is the whole trust of this feature: anyone holding it can impersonate any site to every
+// device that trusts it. A key others can read is refused rather than used.
+func TestWorldReadableKeyIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := proxy.LoadOrCreateCA(dir); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "ca-key.pem")
+	if err := os.Chmod(keyPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := proxy.LoadOrCreateCA(dir)
+	if err == nil {
+		t.Fatal("a key other users can read was loaded anyway")
+	}
+	if !strings.Contains(err.Error(), "readable by other users") {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestFreshKeyIsPrivate(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := proxy.LoadOrCreateCA(dir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(dir, "ca-key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		t.Errorf("a new key is written %04o", mode)
 	}
 }

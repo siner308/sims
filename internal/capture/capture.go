@@ -35,7 +35,23 @@ type Session struct {
 	// may have left behind.
 	configured bool
 	stopped    sync.Once
-	errs       []error
+
+	mu       sync.Mutex
+	serveErr error
+}
+
+func (s *Session) setServeErr(err error) {
+	s.mu.Lock()
+	s.serveErr = err
+	s.mu.Unlock()
+}
+
+// Err is why the proxy stopped listening, or nil while it is healthy. A capture whose proxy has died
+// still has the device pointing at it, so a front end shows this rather than an empty flow list.
+func (s *Session) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.serveErr
 }
 
 // Scope is which traffic a capture opens. A capture that borrows this machine's proxy settings sees
@@ -90,14 +106,16 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 	s := &Session{Device: d, Store: srv.Store, CA: ca, srv: srv, prov: p, host: &hostProxy{}, scope: o.Scope}
 	srv.Attribute = s.attribute
 
-	port, err := srv.Listen(fmt.Sprintf("0.0.0.0:%d", o.Port))
+	port, err := srv.Listen(fmt.Sprintf("%s:%d", listenHost(d), o.Port))
 	if err != nil {
 		return nil, err
 	}
 	s.Port = port
 	go func() {
+		// Serve returns nil on Close; anything else means the proxy stopped listening while the
+		// device still points at it, which the caller has to be able to see.
 		if err := srv.Serve(); err != nil {
-			s.errs = append(s.errs, err)
+			s.setServeErr(err)
 		}
 	}()
 
@@ -118,6 +136,12 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 
 	// A simulator has no network settings of its own: it follows this Mac's, so the capture points
 	// them here and every other app on the machine follows until Stop.
+	if d.Kind == device.KindPhysical {
+		s.Steps = append(s.Steps, device.ProxyStep{
+			Title:  "on the network",
+			Detail: fmt.Sprintf("the proxy is reachable at %s:%d for as long as this runs, by anything on the same network", target.Host, port),
+		})
+	}
 	if needsHostProxy(d) {
 		if !hostProxySupported() {
 			s.Stop()
@@ -133,6 +157,21 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 		})
 	}
 	return s, nil
+}
+
+// listenHost keeps the proxy off the network when nothing needs it there. A phone reaches this
+// machine by its LAN address, so a capture for one has to be reachable; a simulator and an emulator
+// both arrive over loopback, and binding those to the network would offer an open proxy, and a CA
+// that signs for any host, to everyone on the wifi.
+//
+// A phone capture is therefore reachable by anything on the same network for as long as it runs.
+// The phone cannot be told apart by address (a USB serial is a hardware id, an iPhone's is a UDID),
+// so the capture says so in its steps rather than pretending otherwise.
+func listenHost(d device.Device) string {
+	if d.Kind == device.KindPhysical {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
 }
 
 // needsHostProxy reports whether the device borrows this machine's network settings, which only an
@@ -224,7 +263,7 @@ func (s *Session) Addr() string { return fmt.Sprintf(":%d", s.Port) }
 // Stop puts the device and this machine back and closes the proxy. It is safe to call twice, and it
 // runs every step even when one fails, so one error does not strand the rest.
 func (s *Session) Stop() error {
-	var errs []error
+	errs := []error{s.Err()}
 	s.stopped.Do(func() {
 		if s.prov != nil && s.configured {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -245,11 +284,13 @@ func (s *Session) Stop() error {
 	return errors.Join(errs...)
 }
 
-// DefaultCertDir is where the root certificate and its key live between runs.
+// DefaultCertDir is where the root certificate and its key live between runs. The error is passed
+// on rather than falling back to a temp directory: a CA key belongs in the user's own cache, not
+// somewhere every account on the machine can reach.
 func DefaultCertDir() (string, error) {
 	dir, err := os.UserCacheDir()
 	if err != nil {
-		dir = os.TempDir()
+		return "", fmt.Errorf("no user cache directory for the proxy certificate: %w", err)
 	}
 	return filepath.Join(dir, "sims", "proxy"), nil
 }

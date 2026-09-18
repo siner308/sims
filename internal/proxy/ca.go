@@ -52,6 +52,9 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	keyPEM, keyErr := os.ReadFile(keyPath)
 	switch {
 	case certErr == nil && keyErr == nil:
+		if err := checkKeyPermissions(keyPath); err != nil {
+			return nil, err
+		}
 		ca, err := parseCA(certPEM, keyPEM)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", dir, err)
@@ -80,6 +83,21 @@ func LoadOrCreateCA(dir string) (*CA, error) {
 	}
 	ca.path = certPath
 	return ca, ca.initLeafKey()
+}
+
+// checkKeyPermissions refuses a private key others can read. Whoever holds it can impersonate any
+// site to every device that trusts this CA, so a widened mode (a restored backup, a copied cache)
+// has to stop the capture rather than be used anyway.
+func checkKeyPermissions(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		return fmt.Errorf("%s is readable by other users (mode %04o); "+
+			"chmod 600 it or delete it and sims will make a new one", path, mode)
+	}
+	return nil
 }
 
 func newCA() (*CA, error) {

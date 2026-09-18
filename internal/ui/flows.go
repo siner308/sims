@@ -97,6 +97,8 @@ func (v *flowsView) watch() {
 	}()
 }
 
+// close stops following the store. Whatever takes the view off the stack calls it, and esc calls it
+// on the way out, so it has to be safe more than once.
 func (v *flowsView) close() {
 	if v.stop != nil {
 		close(v.stop)

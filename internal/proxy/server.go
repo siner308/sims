@@ -47,6 +47,47 @@ type Server struct {
 	ln   net.Listener
 	srv  *http.Server
 	once sync.Once
+
+	// hijacked holds the CONNECT connections, which Shutdown does not know about: a tunnel would
+	// otherwise keep relaying after the capture reported itself stopped.
+	hijackedMu sync.Mutex
+	hijacked   map[net.Conn]struct{}
+	closed     bool
+}
+
+// track registers a hijacked connection and reports whether the server is still open. A connection
+// hijacked during a Close is closed at once rather than left relaying.
+func (s *Server) track(c net.Conn) bool {
+	s.hijackedMu.Lock()
+	defer s.hijackedMu.Unlock()
+	if s.closed {
+		return false
+	}
+	if s.hijacked == nil {
+		s.hijacked = map[net.Conn]struct{}{}
+	}
+	s.hijacked[c] = struct{}{}
+	return true
+}
+
+func (s *Server) untrack(c net.Conn) {
+	s.hijackedMu.Lock()
+	delete(s.hijacked, c)
+	s.hijackedMu.Unlock()
+}
+
+func (s *Server) closeHijacked() {
+	s.hijackedMu.Lock()
+	conns := make([]net.Conn, 0, len(s.hijacked))
+	for c := range s.hijacked {
+		conns = append(conns, c)
+	}
+	s.hijacked = nil
+	s.closed = true
+	s.hijackedMu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
 }
 
 // Listen binds addr ("127.0.0.1:0" for any free port) and returns the port it got. It also freezes
@@ -115,6 +156,8 @@ func (s *Server) Close() error {
 		}
 		return nil
 	}
+	// Shutdown leaves hijacked connections alone, and every CONNECT is hijacked
+	s.closeHijacked()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := s.srv.Shutdown(ctx); err != nil {
@@ -289,6 +332,12 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, scheme string) 
 			f.Error = "response cut short: " + copyErr.Error()
 		}
 	})
+	if copyErr != nil {
+		// The status and Content-Length are already on their way to the client, so returning here
+		// would hand it a short body that still looks like a complete response. Breaking the
+		// connection is what the client would have seen without a proxy in the way.
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // flushWriter pushes each chunk to the client as it arrives so streamed responses stay live.
@@ -363,6 +412,10 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request, scheme string
 		return
 	}
 	defer client.Close()
+	if !s.track(client) {
+		return
+	}
+	defer s.untrack(client)
 	if err := resp.Write(cbuf); err == nil {
 		err = cbuf.Flush()
 	}
@@ -421,6 +474,10 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, ignore bo
 		return
 	}
 	defer client.Close()
+	if !s.track(client) {
+		return // the capture is stopping; do not start relaying anything new
+	}
+	defer s.untrack(client)
 	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		return
 	}

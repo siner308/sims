@@ -167,3 +167,25 @@ func TestCaptureNoteWarnsAboutTheMac(t *testing.T) {
 		t.Errorf("an emulator does not touch the Mac's proxy, but the note says it does:\n%s", note)
 	}
 }
+
+// A view taken off the stack by anything other than esc used to keep its goroutine, redrawing a page
+// that is no longer shown for the life of the process.
+func TestLeavingTheFlowsViewStopsItsGoroutine(t *testing.T) {
+	a, v, _, stop := startFlowsView(t)
+	defer stop()
+
+	waitFor(t, a, 5*time.Second, func() bool { return v.stop != nil })
+
+	// :img replaces the top view without an esc
+	a.tv.QueueUpdate(func() { a.replaceTop(newImagesView(a)) })
+	waitFor(t, a, 5*time.Second, func() bool { return v.stop == nil })
+}
+
+func TestPopClosesTheFlowsView(t *testing.T) {
+	a, v, _, stop := startFlowsView(t)
+	defer stop()
+
+	waitFor(t, a, 5*time.Second, func() bool { return v.stop != nil })
+	a.tv.QueueUpdate(func() { a.pop() })
+	waitFor(t, a, 5*time.Second, func() bool { return v.stop == nil })
+}

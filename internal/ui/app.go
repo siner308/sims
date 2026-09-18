@@ -25,6 +25,16 @@ type view interface {
 	Refresh()
 }
 
+// closer is a view that owns something beyond its widget, such as a goroutine following a stream.
+// Whatever takes the view off the stack closes it, so nothing keeps redrawing a page that is gone.
+type closer interface{ close() }
+
+func closeView(v view) {
+	if c, ok := v.(closer); ok {
+		c.close()
+	}
+}
+
 type App struct {
 	tv          *tview.Application
 	root        *tview.Flex
@@ -168,6 +178,7 @@ func (a *App) pop() {
 	}
 	top := a.stack[len(a.stack)-1]
 	a.stack = a.stack[:len(a.stack)-1]
+	closeView(top)
 	a.body.RemovePage(top.Name())
 	cur := a.top()
 	a.body.SwitchToPage(cur.Name())
@@ -182,6 +193,7 @@ func (a *App) replaceTop(v view) {
 	if len(a.stack) > 1 {
 		old := a.stack[len(a.stack)-1]
 		a.stack = a.stack[:len(a.stack)-1]
+		closeView(old)
 		a.body.RemovePage(old.Name())
 	}
 	a.push(v)
@@ -260,6 +272,9 @@ func (a *App) onCommand(key tcell.Key) {
 	switch text {
 	case "":
 	case "dev", "devices", "d":
+		for _, v := range a.stack[1:] {
+			closeView(v)
+		}
 		a.stack = a.stack[:1]
 		for _, name := range a.body.GetPageNames(false) {
 			if name != a.stack[0].Name() {

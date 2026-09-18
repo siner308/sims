@@ -183,3 +183,55 @@ func iosSimulator() device.Device {
 		Transport: device.TransportSim, State: device.StateBooted,
 	}
 }
+
+// The proxy signs certificates for any host it is asked about, so it is only on the network when a
+// device that can only be reached there needs it. A simulator or emulator arrives over loopback.
+func TestVirtualDeviceCaptureStaysOnLoopback(t *testing.T) {
+	p := newFake()
+	s, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	if addr := s.ListenAddrForTest(); !strings.HasPrefix(addr, "127.0.0.1:") {
+		t.Errorf("an emulator capture listens on %q; that offers the proxy to the whole network", addr)
+	}
+}
+
+func TestPhoneCaptureIsReachableOnTheNetwork(t *testing.T) {
+	phone := device.Device{
+		ID: "R3C", Name: "SM S928N", Serial: "R3C",
+		Platform: device.PlatformAndroid, Kind: device.KindPhysical,
+		Transport: device.TransportUSB, State: device.StateConnected,
+	}
+	p := newFake()
+	s, err := capture.Start(t.Context(), p, phone, capture.Options{CertDir: t.TempDir()})
+	if err != nil {
+		t.Skip(err) // needs a private address on this machine
+	}
+	defer s.Stop()
+	// a phone cannot reach a loopback-only proxy
+	if addr := s.ListenAddrForTest(); strings.HasPrefix(addr, "127.0.0.1:") {
+		t.Errorf("a phone capture listens on %q, which the phone cannot reach", addr)
+	}
+}
+
+// A proxy that stops listening leaves the device pointing at nothing. The session has to report it,
+// or the UI shows an empty table and the user waits for traffic that can never arrive.
+func TestServeErrorIsReported(t *testing.T) {
+	p := newFake()
+	s, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Err(); err != nil {
+		t.Fatalf("a healthy capture reports %v", err)
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	// Close is the normal end of Serve and is not an error
+	if err := s.Err(); err != nil {
+		t.Errorf("stopping the capture reported %v", err)
+	}
+}

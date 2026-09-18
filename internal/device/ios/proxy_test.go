@@ -52,3 +52,28 @@ func TestProfileNeedsWifiName(t *testing.T) {
 		t.Errorf("error = %q", err)
 	}
 }
+
+// A wifi name is whatever its owner typed. Unescaped, an ampersand or a bracket makes the profile
+// unparseable and the install fails on the phone with nothing to explain it.
+func TestProfileEscapesTheWifiName(t *testing.T) {
+	path, cleanup, err := writeProfile(device.ProxyTarget{
+		Host: "192.168.1.20", Port: 9090, CACertDER: []byte{1, 2, 3},
+		CertName: "sims proxy CA", SSID: `Joe & Ann's <Home>`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		body, _ := os.ReadFile(path)
+		t.Fatalf("a wifi name with & and <> produced an invalid plist: %v %s\n%s", err, out, body)
+	}
+	printed, err := exec.Command("plutil", "-p", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(printed), "Joe & Ann's <Home>") {
+		t.Errorf("the wifi name did not survive the round trip:\n%s", printed)
+	}
+}

@@ -19,3 +19,11 @@ func SessionForTest(t *testing.T, d device.Device, scope Scope) *Session {
 func (s *Session) AttributeForTest(ctx context.Context, clientAddr string) proxy.Attribution {
 	return s.attribute(ctx, clientAddr)
 }
+
+// ListenAddrForTest is the address the proxy actually bound.
+func (s *Session) ListenAddrForTest() string {
+	if s.srv == nil || s.srv.Addr() == nil {
+		return ""
+	}
+	return s.srv.Addr().String()
+}
