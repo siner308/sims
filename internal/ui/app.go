@@ -3,7 +3,10 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -95,11 +98,24 @@ func (a *App) build() {
 	})
 }
 
+// Run holds until the UI stops. A device or a Mac left pointing at a proxy that has stopped has no
+// working network, so the captures come down with it: on the way out of Run for a normal quit, and
+// on a signal for a terminal that kills the process without letting Run return.
 func (a *App) Run() error {
 	defer a.cancel()
-	// a device or a Mac left pointing at a proxy that has stopped cannot reach the network, so the
-	// captures come down with the UI whatever ends it
 	defer a.m.StopAllCaptures()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(signals)
+	go func() {
+		if _, ok := <-signals; !ok {
+			return
+		}
+		// the UI is gone or going; put the machine back before the process does
+		a.m.StopAllCaptures()
+		a.tv.Stop()
+	}()
 	return a.tv.Run()
 }
 

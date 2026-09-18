@@ -64,6 +64,7 @@ func runHeadless(t *testing.T, a *App) (tcell.SimulationScreen, func()) {
 	done := make(chan error, 1)
 	go func() { done <- a.tv.Run() }()
 	return screen, func() {
+		a.m.StopAllCaptures()
 		a.tv.Stop()
 		select {
 		case err := <-done:

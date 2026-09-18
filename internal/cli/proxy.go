@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -101,7 +102,9 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 		session.Store.OnDone(func(f proxy.Flow) { c.printFlow(f) })
 	}
 
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	// SIGTERM too: a capture killed by a script or a shell going away must still put the device and
+	// this machine back, or they are left pointing at a proxy that no longer listens.
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
 	if o.duration > 0 {
 		timer := time.NewTimer(o.duration)
