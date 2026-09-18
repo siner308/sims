@@ -1,0 +1,231 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/siner308/sims/internal/capture"
+	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/proxy"
+)
+
+func (c *cli) proxyCmd() *cobra.Command {
+	cmd := group("proxy", "Watch a device's HTTP traffic", "traffic")
+	cmd.AddCommand(c.proxyRunCmd(), c.proxyCACmd())
+	return cmd
+}
+
+func (c *cli) proxyRunCmd() *cobra.Command {
+	var (
+		port     int
+		harPath  string
+		quiet    bool
+		duration time.Duration
+		maxBody  int
+		all      bool
+	)
+	cmd := &cobra.Command{
+		Use:   "run <device>",
+		Short: "Point a device at a proxy and print its traffic until interrupted",
+		Long: "Point a device at a local proxy, print each request as it completes, and put everything back on exit.\n" +
+			"A simulator has no network settings of its own, so its capture also points this Mac's web proxy at sims.\n" +
+			"Traffic from other apps on the Mac is relayed untouched unless --all is given.",
+		Args: cobra.ExactArgs(1),
+		RunE: c.run(func(ctx context.Context, args []string) error {
+			d, err := c.resolve(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			return c.runProxy(ctx, d, proxyRunOptions{
+				port: port, harPath: harPath, quiet: quiet, duration: duration, maxBody: maxBody, all: all,
+			})
+		}),
+	}
+	cmd.Flags().IntVar(&port, "port", 0, "listen on this port instead of a free one")
+	cmd.Flags().StringVar(&harPath, "har", "", "write the captured flows to this HAR file on exit")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "do not print each request; useful with --har")
+	cmd.Flags().DurationVar(&duration, "for", 0, "stop after this long instead of waiting for an interrupt")
+	cmd.Flags().IntVar(&maxBody, "max-body", proxy.DefaultMaxBody, "how much of each body to keep, in bytes")
+	cmd.Flags().BoolVar(&all, "all", false, "also open this machine's own traffic, not just the device's")
+	return cmd
+}
+
+type proxyRunOptions struct {
+	port     int
+	harPath  string
+	quiet    bool
+	duration time.Duration
+	maxBody  int
+	all      bool
+}
+
+func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) error {
+	scope := capture.ScopeDevice
+	if o.all {
+		scope = capture.ScopeAll
+	}
+	session, err := c.Manager.StartCapture(ctx, d, capture.Options{
+		Port:    o.port,
+		MaxBody: o.maxBody,
+		SSID:    currentSSID(ctx),
+		Scope:   scope,
+	})
+	if err != nil {
+		return err
+	}
+	// the capture owns the device's settings and this machine's; it comes down even on a signal
+	stop := func() {
+		if err := c.Manager.StopCapture(d); err != nil {
+			fmt.Fprintln(c.Err, "sims:", err)
+		}
+	}
+	defer stop()
+
+	fmt.Fprintf(c.Err, "capturing %s on port %d\n", d.Name, session.Port)
+	for _, step := range session.Steps {
+		mark := " "
+		if step.Manual {
+			mark = "!"
+		}
+		fmt.Fprintf(c.Err, " %s %-12s %s\n", mark, step.Title, step.Detail)
+	}
+	fmt.Fprintln(c.Err, "   press ctrl+c to stop and put everything back")
+
+	if !o.quiet {
+		session.Store.OnDone(func(f proxy.Flow) { c.printFlow(f) })
+	}
+
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+	if o.duration > 0 {
+		timer := time.NewTimer(o.duration)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+	} else {
+		<-ctx.Done()
+	}
+	fmt.Fprintln(c.Err)
+
+	if o.harPath != "" {
+		f, err := os.Create(o.harPath)
+		if err != nil {
+			return err
+		}
+		flows := session.Flows()
+		if err := proxy.WriteHAR(f, c.Version, flows); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.Err, "wrote %s\n", o.harPath)
+	}
+	return nil
+}
+
+// printFlow writes one line per exchange, or the whole record with --json.
+func (c *cli) printFlow(f proxy.Flow) {
+	if c.json {
+		enc := json.NewEncoder(c.Out)
+		_ = enc.Encode(f)
+		return
+	}
+	status := fmt.Sprint(f.Status)
+	switch {
+	case f.Kind == proxy.KindTunnel:
+		status = "tunnel"
+	case f.Status == 0:
+		status = "failed"
+	}
+	origin := ""
+	if f.Origin == proxy.OriginHost {
+		origin = " [host: " + f.Process + "]"
+	}
+	note := ""
+	if f.Error != "" {
+		note = "  " + f.Error
+	}
+	fmt.Fprintf(c.Out, "%-6s %-6s %-9s %s%s%s\n",
+		f.Method, status, proxy.SizeString(f.RespSize), f.URL, origin, note)
+}
+
+func (c *cli) proxyCACmd() *cobra.Command {
+	var install bool
+	cmd := &cobra.Command{
+		Use:   "ca [device]",
+		Short: "Print the proxy's root certificate, or install it on a device",
+		Long: "Print the root certificate sims signs with. With a device and --install it is trusted there,\n" +
+			"which is the part of a capture that survives between runs.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: c.run(func(ctx context.Context, args []string) error {
+			dir, err := capture.DefaultCertDir()
+			if err != nil {
+				return err
+			}
+			ca, err := proxy.LoadOrCreateCA(dir)
+			if err != nil {
+				return err
+			}
+			if len(args) == 0 {
+				if c.json {
+					return c.printJSON(map[string]string{
+						"path":        ca.Path(),
+						"fingerprint": ca.Fingerprint(),
+						"notAfter":    ca.NotAfter().Format(time.RFC3339),
+					})
+				}
+				_, err := c.Out.Write(ca.CertPEM())
+				return err
+			}
+			d, err := c.resolve(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if !install {
+				return fmt.Errorf("pass --install to trust the certificate on %s", d.Name)
+			}
+			p, err := c.Manager.Provider(d.Platform)
+			if err != nil {
+				return err
+			}
+			proxier, ok := p.(device.Proxier)
+			if !ok {
+				return fmt.Errorf("%s cannot install a certificate from here", d.Platform)
+			}
+			steps, err := proxier.SetProxy(ctx, d, device.ProxyTarget{
+				CACert: ca.CertPEM(), CACertDER: ca.CertDER(), CertName: "sims proxy CA",
+				Host: "127.0.0.1", Port: 0, SSID: currentSSID(ctx),
+			})
+			if err != nil {
+				return err
+			}
+			// the certificate is what was wanted, not the proxy setting that came with it
+			if err := proxier.ClearProxy(ctx, d); err != nil {
+				fmt.Fprintln(c.Err, "sims:", err)
+			}
+			if c.json {
+				return c.printJSON(steps)
+			}
+			for _, s := range steps {
+				prefix := " "
+				if s.Manual {
+					prefix = "!"
+				}
+				fmt.Fprintf(c.Out, "%s %-12s %s\n", prefix, s.Title, s.Detail)
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().BoolVar(&install, "install", false, "trust the certificate on the named device")
+	return cmd
+}

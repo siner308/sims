@@ -21,6 +21,7 @@ type Manager struct {
 	all       []device.Provider
 	providers map[device.Platform]device.Provider
 	missing   map[device.Platform]error
+	captures  captures
 }
 
 // New keeps every provider for doctor to probe but routes work only to those whose toolchain is present.

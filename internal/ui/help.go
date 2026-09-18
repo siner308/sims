@@ -34,6 +34,7 @@ func newHelpView(a *App) *helpView {
 		{strings.ToUpper(resourceName), resource},
 		{"GENERAL", append(append([]hint(nil), globalHints...), []hint{
 			{":dev", "devices (root)"}, {":apps", "apps of selected device"}, {":logs", "logs of selected device"},
+			{":proxy", "watch traffic of selected device"},
 			{":img", "images / new device"}, {":connect HOST:PORT", "adb connect"}, {":pair HOST:PORT CODE", "adb pair"},
 		}...)},
 		{"NAVIGATION", navigationHints},

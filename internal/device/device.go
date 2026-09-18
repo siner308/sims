@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"slices"
 	"time"
@@ -284,4 +285,49 @@ type Wireless interface {
 	Disconnect(ctx context.Context, d Device) error
 	// EnableWireless switches a USB-attached device to network debugging and returns the address it connected to.
 	EnableWireless(ctx context.Context, d Device) (string, error)
+}
+
+// ProxyTarget is where a device should send its traffic, and what it must trust to have TLS opened.
+type ProxyTarget struct {
+	// Host and Port are how the device reaches the proxy: an emulator uses its host loopback alias,
+	// a phone the address of this machine on the network it shares.
+	Host string
+	Port int
+	// CACert is the root certificate in PEM form, empty when only the proxy setting is wanted.
+	CACert []byte
+	// CACertDER is the same certificate in DER, which an iOS configuration profile carries.
+	CACertDER []byte
+	// CertName labels the certificate where the device shows it.
+	CertName string
+	// SSID is the wifi network a phone's proxy setting is attached to; iOS has no global proxy.
+	SSID string
+}
+
+func (t ProxyTarget) Addr() string { return fmt.Sprintf("%s:%d", t.Host, t.Port) }
+
+// ProxyStep is one thing that has to happen on the device, and whether sims did it.
+type ProxyStep struct {
+	Title string `json:"title"`
+	// Detail carries what the user has to do when Manual is set, or what sims did when it is not.
+	Detail string `json:"detail,omitempty"`
+	Manual bool   `json:"manual"`
+}
+
+// ProxyState is what a device currently reports about its proxy configuration.
+type ProxyState struct {
+	Addr    string `json:"addr,omitempty"`
+	Trusted bool   `json:"trusted"`
+	// Steps records how the device was set up, so a UI can show what is left to do by hand.
+	Steps []ProxyStep `json:"steps,omitempty"`
+}
+
+func (s ProxyState) On() bool { return s.Addr != "" }
+
+// Proxier is implemented by providers that can point a device at an HTTP proxy. SetProxy with a
+// zero ProxyTarget clears the setting, which every implementation must support: a device left
+// pointing at a proxy that is gone cannot reach the network.
+type Proxier interface {
+	SetProxy(ctx context.Context, d Device, t ProxyTarget) ([]ProxyStep, error)
+	ClearProxy(ctx context.Context, d Device) error
+	ProxyState(ctx context.Context, d Device) (ProxyState, error)
 }

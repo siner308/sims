@@ -119,6 +119,22 @@ Apps you installed come first with their display name and version; preinstalled 
 
 Live `logcat` or `log stream` with a substring filter, pause, clear, and a wrap toggle for long lines. From the apps view, `l` narrows the stream to the selected app (`logcat --pid` on Android, `log stream --predicate` on iOS). Works for simulators and for physical devices (`idevicesyslog` on iOS).
 
+### Traffic
+
+Press `t` on a device and sims becomes the proxy it talks to: requests appear as they finish, with
+method, status, host, path, size and how long each took. `enter` opens one in full, with headers and
+a pretty-printed body, `/` filters, `s` writes a HAR file that Proxyman, Charles or the browser dev
+tools can read, and `ctrl+k` stops the capture and puts every setting back.
+
+Opening HTTPS needs the device to trust a certificate sims signs with, and sims installs it as part
+of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb push` into the
+system trust store on an emulator that allows it, a configuration profile on an iPhone. The
+certificate is made once and kept, so the second capture on a device needs no setup at all.
+
+What sims could not read is still listed rather than hidden. An app that pins its certificate refuses
+every proxy, sims included; those rows show as `tunnel` and say why, which is the difference between
+a limit and a bug.
+
 ### Images and new devices
 
 <p align="center">
@@ -164,6 +180,9 @@ sims app install <device> <path>            # .apk on android; .app or .ipa on a
 sims app uninstall | launch <device> <bundle>
 sims app logs <device> <bundle>             # android: the app must be running (logcat --pid)
 
+sims proxy run <device> [--port N] [--har out.har] [--for 30s] [--all] [--quiet] [--json]
+sims proxy ca [device] [--install]          # print the root certificate, or trust it on a device
+
 sims image list [--all]                     # --all includes what sdkmanager can still download
 sims image install <image>                  # android; iOS runtimes come from xcodebuild -downloadPlatform iOS
 sims device-type list [--image <image>]     # --image keeps only the types that can run it
@@ -171,6 +190,13 @@ sims device-type list [--image <image>]     # --image keeps only the types that 
 sims doctor
 sims update [--check]
 ```
+
+`proxy run` prints one line per exchange and holds until ctrl+c (or `--for`), then puts the device and
+this machine back as they were. `--har` writes the flows in HAR 1.2. A simulator has no network
+settings of its own and follows this Mac's, so its capture points the Mac's web proxy at sims; other
+apps on the Mac keep working, because traffic that is not the device's is relayed untouched and never
+captured. `--all` widens that to everything the proxy receives. The root certificate lives in the user
+cache directory and is reused, so `proxy ca --install` is a one-off per device.
 
 `--image` and `--type` take an id or a name from the matching `list`, and the image must be installed (`sims image install` for Android). Without `--type`, Android takes `pixel_7` and iOS takes `iPhone 17 Pro`; when the SDK has neither, the first iPhone simctl lists (its newest), else the first type that can run the image. `--ram`, `--cores` and `--disk` are refused on iOS. `connect` and `pair` by address give adb 20 seconds, because `adb connect` blocks for over a minute on an unreachable host.
 
@@ -199,7 +225,7 @@ sims skill > SKILL.md                   # for any other agent
 
 | Scope | Key | Action |
 |-------|-----|--------|
-| global | `:` | command bar (`:dev` `:apps` `:logs` `:img` `:update` `:connect HOST:PORT` `:pair HOST:PORT CODE`) |
+| global | `:` | command bar (`:dev` `:apps` `:logs` `:proxy` `:img` `:update` `:connect HOST:PORT` `:pair HOST:PORT CODE`) |
 | global | `?` / `esc` / `ctrl+c` | help / back / quit |
 | global | `r` | refresh |
 | devices | `b` | boot |
@@ -208,6 +234,10 @@ sims skill > SKILL.md                   # for any other agent
 | devices | `n` / `e` / `s` / `/` | new device (opens images) / edit hardware of an AVD (RAM, cores, disk; applied at its next boot) / show never-booted simulators / filter |
 | devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
+| devices | `t` | watch the device's HTTP traffic; press it again later to reopen a running capture |
+| proxy | `enter` `/` `c` `p` `d` `s` | inspect one exchange, filter, clear, pause, hide this machine's own apps, save a HAR file |
+| proxy | `ctrl+k` / `esc` | stop the capture and restore every setting / leave the view with the capture running |
+| flow | `tab` / `shift+tab` | overview, request, response |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
 | devices | `shift+p` `shift+v` `shift+n` `shift+m` `shift+r` `shift+s` `shift+l` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
 | apps | `enter` / `i` / `shift+i` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |
@@ -249,6 +279,7 @@ A paired phone on the same wifi shows as `Offline` until a CoreDevice tunnel is 
 | install / uninstall / launch | `adb install -r`, `adb uninstall`, `cmd package resolve-activity` + `am start -n` | sim: `simctl install/uninstall/launch`, device: `devicectl device install app / uninstall app / process launch` |
 | logs | `adb logcat -v time` (+ `--pid=$(pidof pkg)` for one app) | sim: `simctl spawn UDID log stream` (+ `--predicate 'process == NAME'`), device: `idevicesyslog -u UDID` (+ `-p NAME`, per the libimobiledevice docs; untested here) |
 | wifi / pair | `adb tcpip 5555`, `adb connect`, `adb pair`, `adb disconnect` | `devicectl manage pair`, `devicectl device info details` (opens the tunnel) |
+| proxy | `adb shell settings put global http_proxy HOST:PORT` (`:0` clears it); certificate by `adb push` into the system store where the image allows it, otherwise the user store | sim: `simctl keychain add-root-cert`, plus this Mac's `networksetup -setwebproxy` / `-setsecurewebproxy`; device: a `.mobileconfig` carrying the root and the proxy, sent with `devicectl device profile install` |
 | images | `sdkmanager --list` | `simctl list runtimes --json` |
 | create | `avdmanager create avd -n -k -d`, then `hw.keyboard = yes` and the chosen `hw.ramSize` / `hw.cpu.ncore` / `disk.dataPartition.size` in `config.ini` | `simctl create NAME TYPE RUNTIME` |
 | device types | `avdmanager list device -c`; screen size from `<sdk>/skins/<id>/layout` when that skin is installed | `simctl list devicetypes --json`; screen size from each type's `profile.plist` |

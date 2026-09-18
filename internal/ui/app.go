@@ -9,6 +9,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
 	"github.com/siner308/sims/internal/sims"
 	"github.com/siner308/sims/internal/update"
@@ -96,6 +97,9 @@ func (a *App) build() {
 
 func (a *App) Run() error {
 	defer a.cancel()
+	// a device or a Mac left pointing at a proxy that has stopped cannot reach the network, so the
+	// captures come down with the UI whatever ends it
+	defer a.m.StopAllCaptures()
 	return a.tv.Run()
 }
 
@@ -252,16 +256,23 @@ func (a *App) onCommand(key tcell.Key) {
 		a.stack[0].Refresh()
 	case "img", "images", "i":
 		a.replaceTop(newImagesView(a))
-	case "apps", "a", "logs", "l":
+	case "apps", "a", "logs", "l", "proxy", "t":
 		d, ok := a.selectedDevice()
 		if !ok {
 			a.flash("select a device first")
 			return
 		}
-		if text == "apps" || text == "a" {
+		switch text {
+		case "apps", "a":
 			a.replaceTop(newAppsView(a, d))
-		} else {
+		case "logs", "l":
 			a.replaceTop(newLogsView(a, d, nil))
+		default:
+			if s, running := a.m.Capture(d); running {
+				a.replaceTop(newFlowsView(a, d, s))
+				return
+			}
+			a.startCapture(d, capture.ScopeDevice, func(s *capture.Session) { a.replaceTop(newFlowsView(a, d, s)) })
 		}
 	case "help", "h", "?":
 		a.push(newHelpView(a))
@@ -295,6 +306,37 @@ func (a *App) wirelessCommand(fields []string) {
 		a.flash(fmt.Sprintf("%s %s: ok", verb, addr))
 		a.stack[0].Refresh()
 	})
+}
+
+// startCapture puts a device behind the proxy and hands the running session to then. The steps a
+// capture could not do itself are surfaced here, because a user who is not told will wait for
+// traffic that cannot arrive.
+func (a *App) startCapture(d device.Device, scope capture.Scope, then func(*capture.Session)) {
+	a.setStatus(" setting " + d.Name + " up behind the proxy...")
+	var session *capture.Session
+	a.async(func() error {
+		var err error
+		session, err = a.m.StartCapture(a.ctx, d, capture.Options{SSID: currentSSID(a.ctx), Scope: scope})
+		return err
+	}, func() {
+		a.setStatus("")
+		if manual := manualSteps(session.Steps); manual != "" {
+			a.confirm("capturing "+d.Name+", but it needs you first:\n\n"+manual, func() { then(session) })
+			return
+		}
+		a.flash("capturing " + d.Name + " on port " + fmt.Sprint(session.Port))
+		then(session)
+	})
+}
+
+func manualSteps(steps []device.ProxyStep) string {
+	var out []string
+	for _, s := range steps {
+		if s.Manual {
+			out = append(out, fmt.Sprintf("%d. %s", len(out)+1, s.Detail))
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 func (a *App) selectedDevice() (device.Device, bool) {

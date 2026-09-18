@@ -89,3 +89,9 @@ func avdHome() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".android", "avd")
 }
+
+// NewWithADB builds a provider that runs a given adb binary. Tests use it to assert the exact
+// command line sims builds without a device attached.
+func NewWithADB(adbPath string) *Provider {
+	return &Provider{sdk: sdk{root: filepath.Dir(filepath.Dir(adbPath))}, labels: newLabelCache(), adbOverride: adbPath}
+}

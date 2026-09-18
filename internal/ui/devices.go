@@ -11,6 +11,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
 	"github.com/siner308/sims/internal/sims"
 )
@@ -74,7 +75,7 @@ func (v *devicesView) Hints() []hint {
 		{"ctrl+k", "shutdown"}, {"ctrl+e", "wipe data (keep device)"}, {"ctrl+d", "delete device"},
 		groupBreak,
 		{"n", "new device"}, {"e", "edit hardware (avd)"}, {"s", "show unused sims"}, {"/", "filter"}, {"p", "pair (ios)"},
-		{"w", "connect wifi"}, {"x", "disconnect wifi"},
+		{"w", "connect wifi"}, {"x", "disconnect wifi"}, {"t", "watch traffic"},
 		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 		groupBreak,
@@ -289,6 +290,8 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.disconnect()
 	case 'p':
 		v.pair()
+	case 't':
+		v.watchTraffic()
 	case 'e':
 		v.editHardware()
 	case 's':
@@ -416,6 +419,49 @@ const pairingGuide = "Before answering yes:\n" +
 	"1. Developer Mode is on (Settings > Privacy & Security > Developer Mode) and the phone is unlocked\n" +
 	"2. For a phone this Mac has never seen, it is plugged in over USB and you tapped Trust\n" +
 	"3. Then accept the pairing prompt that appears on the phone"
+
+// watchTraffic opens the flows of a running capture, or explains what starting one will change and
+// then starts it. Both device paths land in the same view.
+func (v *devicesView) watchTraffic() {
+	d, ok := v.selected()
+	if !ok {
+		return
+	}
+	if s, running := v.app.m.Capture(d); running {
+		v.app.push(newFlowsView(v.app, d, s))
+		return
+	}
+	if !v.app.m.CanCapture(d) {
+		v.app.flashErr(fmt.Errorf("%s cannot be pointed at a proxy from here", d.Platform))
+		return
+	}
+	if !d.Reachable() {
+		v.app.flashErr(fmt.Errorf("%s is %s; boot or connect it first", d.Name, strings.ToLower(string(d.State))))
+		return
+	}
+	v.app.confirm(fmt.Sprintf("watch %s's traffic?\n\n%s", d.Name, captureNote(d)), func() {
+		v.app.startCapture(d, capture.ScopeDevice, func(s *capture.Session) { v.app.push(newFlowsView(v.app, d, s)) })
+	})
+}
+
+// captureNote says what the capture will change before it changes it: on a simulator that includes
+// this Mac's own network settings, which is the part a user would not expect.
+func captureNote(d device.Device) string {
+	switch {
+	case needsHostProxy(d):
+		return "sims trusts its certificate on the simulator, and points this Mac's web proxy at itself\n" +
+			"while the capture runs. Other apps on the Mac keep working: their traffic is relayed\n" +
+			"untouched and is not captured. Everything goes back when you stop."
+	case d.Kind == device.KindPhysical && d.Platform == device.PlatformIOS:
+		return "sims sends the phone a profile carrying its certificate and the proxy setting.\n" +
+			"You approve it in Settings, then switch the certificate on under Certificate Trust Settings."
+	case d.Kind == device.KindPhysical:
+		return "sims points the phone at this machine and pushes its certificate.\n" +
+			"A release build that does not trust user certificates still shows as unread traffic."
+	}
+	return "sims points the emulator at itself and installs its certificate.\n" +
+		"An app targeting API 24+ reads it only where its network security config trusts `user`."
+}
 
 func (v *devicesView) act(verb string, dangerous bool, fn func(context.Context, device.Device) error) {
 	d, ok := v.selected()

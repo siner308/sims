@@ -5,8 +5,8 @@ description: >
   instead of raw adb, emulator, avdmanager, sdkmanager, xcrun simctl or xcrun devicectl. Use this
   skill whenever a task touches a mobile device from the command line: listing or booting an
   emulator or simulator, creating or deleting one, wiping it, installing an .apk or .app, launching
-  an app, tailing device or app logs, pairing or connecting a phone over wifi, or checking the
-  Android SDK and Xcode toolchain. Trigger even when the user names the underlying tool ("run adb
+  an app, tailing device or app logs, watching a device's HTTP traffic through a proxy, pairing or
+  connecting a phone over wifi, or checking the Android SDK and Xcode toolchain. Trigger even when the user names the underlying tool ("run adb
   install", "boot the simulator with simctl", "create an AVD") or a device by name ("Pixel_7",
   "iPhone 16", "my phone"), as long as `sims` is installed or can be installed.
 ---
@@ -58,6 +58,9 @@ sims app uninstall <device> <bundle-id>     # no confirmation
 sims app launch <device> <bundle-id>
 sims app logs <device> <bundle-id-or-name>  # android: the app must already be running
 
+sims proxy run <device> [--port N] [--har out.har] [--for 30s] [--all] [--quiet]
+sims proxy ca [device] [--install]          # print the root certificate, or trust it on a device
+
 sims image list [--all]                     # installed system images and simulator runtimes; --all adds downloadable
 sims image install <image>                  # android only; iOS runtimes: xcodebuild -downloadPlatform iOS
 sims device-type list [--image <image>]     # hardware profiles; --image keeps only those that run it
@@ -68,6 +71,13 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 ```
 
 `--image` and `--type` accept an id or name from the matching `list`, but Android image names repeat across API levels (`google_apis_playstore arm64-v8a` exists for 30, 31, 35 and 36), so pass the Android image id. Without `--type` sims picks `pixel_7` on Android and `iPhone 17 Pro` on iOS, falling back to the newest iPhone or the first type that runs the image. `--ram`, `--cores` and `--disk` are refused on iOS. `--help` on any subcommand prints the exact flags of the installed version.
+
+`proxy run` holds until interrupted, so it needs `--for` or a `timeout`, exactly like the log streams.
+It prints one line per exchange (`--json` prints a record per flow) and restores the device and this
+machine on exit. An iOS simulator has no network settings of its own, so its capture points this Mac's
+web proxy at sims for as long as it runs; other apps on the Mac are relayed untouched and are not
+captured unless `--all` is given. A `tunnel` line is traffic sims could not open, which means the app
+pins its certificate: that is a limit of every proxy, not a failure to report.
 
 ## JSON shapes
 
@@ -147,6 +157,14 @@ sims device pair 192.168.0.12:37123 482913   # pairing port and code from the ph
 sims device connect 192.168.0.12:5555        # the connect port, not the pairing port
 ```
 
+Watch what an app sends, then read it back:
+
+```sh
+ID=$(sims device list --json | jq -r '.[] | select(.state=="Booted") | .id' | head -1)
+sims proxy run "$ID" --for 60s --har traffic.har --quiet
+jq -r '.log.entries[] | "\(.response.status) \(.request.method) \(.request.url)"' traffic.har
+```
+
 ## When something fails
 
 Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds a `see 'sims ... --help'` line; a device that is not found does not. A listing whose one platform failed still prints the other and reports the failure on stderr, so check stderr even on exit 0.
@@ -170,3 +188,6 @@ Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds
 | state `Unauthorized` | The Android phone shows an "Allow USB debugging" prompt; the user must accept it. |
 | `missing adb` / `xcrun not found` / `idevicesyslog not found` | `sims doctor` for the full picture; install what it lists (`brew install libimobiledevice` for iPhone logs). |
 | `this build cannot update itself` | Installed with `go install`; rerun the install line or `go install ...@latest`. |
+| `<platform> cannot be pointed at a proxy from here` | Traffic capture needs a running emulator, simulator or paired phone. |
+| proxy rows all say `tunnel` on Android | The app does not trust user certificates. Add `<certificates src="user" />` to its debug `network_security_config`, or capture a debug build. |
+| `a phone takes its proxy from the wifi network it is on` | Run it on a Mac joined to wifi; a phone's proxy profile attaches to a named network. |

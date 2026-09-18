@@ -20,6 +20,16 @@ type Provider struct {
 	sdk    sdk
 	sdkErr error
 	labels *labelCache
+	// adbOverride replaces the SDK's adb; only tests set it.
+	adbOverride string
+}
+
+// adb is the binary every device command runs through.
+func (p *Provider) adb() string {
+	if p.adbOverride != "" {
+		return p.adbOverride
+	}
+	return p.sdk.adb()
 }
 
 func New() *Provider {
