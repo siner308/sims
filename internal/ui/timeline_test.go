@@ -128,3 +128,19 @@ func TestTimelineDropsOldestWhenFull(t *testing.T) {
 		t.Errorf("entries = %d, want the cap of 3", n)
 	}
 }
+
+// Android's log lines carry no year, so it comes from the stream's clock. A line from the end of
+// December read in January belongs to the year before, not a year in the future.
+func TestAndroidLineKeepsItsYearAcrossNewYear(t *testing.T) {
+	ref := time.Date(2027, 1, 2, 10, 0, 0, 0, time.Local)
+	at, ok := parseLogTime("12-31 23:59:01.000 I/MyApp  ( 1234): last of the year", ref)
+	if !ok {
+		t.Fatal("timestamp not recognised")
+	}
+	if at.Year() != 2027-1 {
+		t.Errorf("year = %d, want %d", at.Year(), 2027-1)
+	}
+	if at.After(ref) {
+		t.Errorf("a line already logged was placed in the future: %v is after %v", at, ref)
+	}
+}
