@@ -3,9 +3,11 @@ package capture
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // hostProxy drives this Mac's own proxy settings, which is what a simulator follows. It remembers
@@ -83,6 +85,20 @@ func readHostProxy(ctx context.Context, service, kind string) (netsetupState, er
 	return st, nil
 }
 
+// isDeadLoopbackProxy reports whether a setting points at a port on this machine that nothing
+// answers on: the fingerprint of a capture that was killed before it could restore anything.
+func isDeadLoopbackProxy(st netsetupState) bool {
+	if st.server != "127.0.0.1" && st.server != "localhost" && st.server != "::1" {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(st.server, strconv.Itoa(st.port)), 300*time.Millisecond)
+	if err != nil {
+		return true
+	}
+	conn.Close()
+	return false
+}
+
 // set points the machine's web and secure web proxies at addr, remembering what was there.
 func (h *hostProxy) set(ctx context.Context, host string, port int) error {
 	service, err := activeService(ctx)
@@ -94,6 +110,12 @@ func (h *hostProxy) set(ctx context.Context, host string, port int) error {
 		before, err := readHostProxy(ctx, service, kind)
 		if err != nil {
 			return err
+		}
+		// A capture that died without restoring leaves the machine pointing at a loopback port that
+		// no longer listens. Treating that as the setting to put back would hand the dead proxy
+		// straight back to the user, so it is recorded as "was off" instead.
+		if before.enabled && isDeadLoopbackProxy(before) {
+			before.enabled, before.server, before.port = false, "", 0
 		}
 		h.before = append(h.before, before)
 		if err := exec.CommandContext(ctx, "networksetup", "-set"+kind, service, host, strconv.Itoa(port)).Run(); err != nil {

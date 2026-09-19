@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"net"
 	"os/exec"
 	"strings"
 	"testing"
@@ -68,4 +69,32 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+// A capture killed before it could restore leaves the machine pointing at a loopback port that
+// nothing answers on. The next capture must not treat that as the setting to put back, or it hands
+// the dead proxy straight back and the machine still has no working network.
+func TestDeadLoopbackProxyIsNotRestored(t *testing.T) {
+	// a port nothing listens on
+	dead := netsetupState{kind: "webproxy", enabled: true, server: "127.0.0.1", port: 59999}
+	if !isDeadLoopbackProxy(dead) {
+		t.Error("a loopback port with no listener was treated as a live proxy")
+	}
+
+	// a port something does listen on is a real setting and is kept
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	live := netsetupState{kind: "webproxy", enabled: true, server: "127.0.0.1", port: ln.Addr().(*net.TCPAddr).Port}
+	if isDeadLoopbackProxy(live) {
+		t.Error("a listening loopback proxy was taken for a dead one")
+	}
+
+	// a proxy somewhere else on the network is never guessed at
+	remote := netsetupState{kind: "webproxy", enabled: true, server: "proxy.corp.example", port: 8080}
+	if isDeadLoopbackProxy(remote) {
+		t.Error("a non-loopback proxy was probed and discarded")
+	}
 }
