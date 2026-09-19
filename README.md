@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platforms">
 </p>
 
-**sims** is a terminal UI for the devices a mobile developer keeps around: Android emulators, iOS simulators, and the phones plugged in over USB or sitting on the same wifi. It wraps `adb`, `emulator`, `avdmanager`, `sdkmanager`, `xcrun simctl` and `xcrun devicectl` behind one k9s-style screen, so booting, installing a build, tailing logs or wiping a device is a keystroke instead of a command you have to remember.
+**sims** is a terminal UI for the devices a mobile developer keeps around: Android emulators, iOS simulators, the phones plugged in over USB or sitting on the same wifi, and the machine you are sitting at. It wraps `adb`, `emulator`, `avdmanager`, `sdkmanager`, `xcrun simctl` and `xcrun devicectl` behind one k9s-style screen, so booting, installing a build, tailing logs or wiping a device is a keystroke instead of a command you have to remember.
 
 <p align="center">
   <img src="docs/img/devices.svg" alt="devices view" width="100%">
@@ -130,6 +130,13 @@ Opening HTTPS needs the device to trust a certificate sims signs with, and sims 
 of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb push` into the
 system trust store on an emulator that allows it, a configuration profile on an iPhone. The
 certificate is made once and kept, so the second capture on a device needs no setup at all.
+
+The machine sims runs on is in the list too, as a `desktop` device. It boots nothing and installs
+nothing, and says so when asked, but its traffic and its system log are the same two things sims
+shows for everything else: `t` captures what the apps on this Mac are sending, with each row named
+by the process behind it. Trusting the certificate there is a command rather than part of starting a
+capture, because macOS puts up an authorisation panel: `sims proxy ca localhost --install`. Windows
+lists the same way and trusts through `certutil -user`.
 
 A capture puts every setting back when it stops, including on ctrl+c or a SIGTERM. When it cannot,
 because it was killed outright or the machine lost power, it leaves a note of what it changed: the

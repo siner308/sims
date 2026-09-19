@@ -13,6 +13,9 @@ type Platform string
 const (
 	PlatformAndroid Platform = "android"
 	PlatformIOS     Platform = "ios"
+	// PlatformDesktop is the machine sims itself runs on. It is a device like any other for the
+	// things a desktop can do (its traffic, its log) and says so for the rest.
+	PlatformDesktop Platform = "desktop"
 )
 
 type State string
@@ -35,6 +38,9 @@ type Kind string
 const (
 	KindVirtual  Kind = "virtual"
 	KindPhysical Kind = "physical"
+	// KindHost is this machine: not something sims boots or installs onto, but something whose
+	// traffic and log it can show.
+	KindHost Kind = "host"
 )
 
 // Transport is how the host reaches the device: avd/sim for virtual, usb/wifi for physical.
@@ -45,6 +51,8 @@ const (
 	TransportSim  Transport = "sim"
 	TransportUSB  Transport = "usb"
 	TransportWiFi Transport = "wifi"
+	// TransportLocal is the machine sims runs on: nothing is reached, it is already here.
+	TransportLocal Transport = "local"
 )
 
 // ID is what the provider needs back to act on the device: AVD name on Android, UDID on iOS.
@@ -82,6 +90,9 @@ func (d Device) StateRank() int {
 func (d Device) Running() bool {
 	return d.State == StateBooted || d.State == StateConnected
 }
+
+// IsHost reports whether this record is the machine sims is running on.
+func (d Device) IsHost() bool { return d.Kind == KindHost }
 
 // Reachable reports whether a command can be sent to the device as it stands. CoreDevice drops the
 // wifi tunnel to an idle iPhone, which shows as Offline, and reopens it for whatever command comes

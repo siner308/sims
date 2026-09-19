@@ -9,6 +9,7 @@ import (
 
 	"github.com/siner308/sims/internal/cli"
 	"github.com/siner308/sims/internal/device/android"
+	"github.com/siner308/sims/internal/device/desktop"
 	"github.com/siner308/sims/internal/device/ios"
 	"github.com/siner308/sims/internal/sims"
 	"github.com/siner308/sims/internal/ui"
@@ -30,7 +31,7 @@ func resolveVersion() string {
 
 func main() {
 	v := resolveVersion()
-	m := sims.New(android.New(), ios.New())
+	m := sims.New(android.New(), ios.New(), desktop.New())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	code := cli.Execute(ctx, cli.Options{
 		Version: v,

@@ -178,7 +178,7 @@ func TestDeviceGetAndResolution(t *testing.T) {
 func TestUsageErrorsPointAtHelp(t *testing.T) {
 	f := newFixture()
 	f.fails(t, "see 'sims device boot --help'", "device", "boot")
-	f.fails(t, `--platform must be android or ios, not "windows"`, "device", "list", "-p", "windows")
+	f.fails(t, `--platform must be android, ios or desktop, not "windows"`, "device", "list", "-p", "windows")
 	f.fails(t, "unknown command", "devices", "defenestrate")
 }
 

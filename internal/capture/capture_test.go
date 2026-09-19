@@ -339,3 +339,21 @@ func TestNoteSurvivesAProcessThatNeverCleanedUp(t *testing.T) {
 		t.Fatalf("the capture left no note for a later run to act on: %v", err)
 	}
 }
+
+// Capturing this machine means its own apps are the subject, so nothing is passed through: the
+// default scope would otherwise ignore every connection and record an empty session.
+func TestHostCaptureOpensThisMachinesApps(t *testing.T) {
+	host := device.Device{
+		ID: "localhost", Name: "This Mac",
+		Platform: device.PlatformDesktop, Kind: device.KindHost,
+		Transport: device.TransportLocal, State: device.StateConnected,
+	}
+	s := capture.SessionForTest(t, host, capture.ScopeDevice)
+	got := s.AttributeForTest(t.Context(), "127.0.0.1:1234")
+	if got.Ignore {
+		t.Error("a capture of this machine ignored this machine's own traffic")
+	}
+	if got.Origin != proxy.OriginDevice {
+		t.Errorf("origin = %q, want the machine to be the device", got.Origin)
+	}
+}

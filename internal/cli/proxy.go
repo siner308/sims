@@ -221,6 +221,17 @@ func (c *cli) proxyCACmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// this machine's own trust store needs a GUI authorisation panel, which only works from
+			// a terminal; that is why it is a command rather than part of starting a capture
+			if truster, ok := p.(interface {
+				TrustCert(context.Context, []byte) error
+			}); ok && d.IsHost() {
+				if err := truster.TrustCert(ctx, ca.CertPEM()); err != nil {
+					return err
+				}
+				return c.result(map[string]string{"trusted": d.Name},
+					"trusted "+ca.Fingerprint()[:16]+" on "+d.Name)
+			}
 			proxier, ok := p.(device.Proxier)
 			if !ok {
 				return fmt.Errorf("%s cannot install a certificate from here", d.Platform)

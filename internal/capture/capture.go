@@ -193,9 +193,12 @@ func (s *Session) writeJournal() {
 	_ = writeJournal(s.certDir, j)
 }
 
-// needsHostProxy reports whether the device borrows this machine's network settings, which only an
-// iOS simulator does: an Android emulator has its own.
+// needsHostProxy reports whether the device borrows this machine's network settings. An iOS
+// simulator does, and so does the machine itself; an Android emulator has its own.
 func needsHostProxy(d device.Device) bool {
+	if d.IsHost() {
+		return true
+	}
 	return d.Platform == device.PlatformIOS && d.Kind == device.KindVirtual
 }
 
@@ -241,8 +244,16 @@ func (s *Session) attribute(ctx context.Context, clientAddr string) proxy.Attrib
 	}
 	p, lookupErr := proxy.LookupProcess(ctx, clientAddr)
 	if lookupErr != nil {
+		if s.Device.IsHost() {
+			// watching this machine: a connection sims cannot name is still this machine's
+			return s.decide(proxy.Attribution{Origin: proxy.OriginDevice})
+		}
 		// an unattributable connection is left alone rather than opened on a guess
 		return s.decide(proxy.Attribution{})
+	}
+	if s.Device.IsHost() {
+		// the app on this machine is the device here, so its name is what the table should show
+		return s.decide(proxy.Attribution{Label: p.Name, Origin: proxy.OriginDevice})
 	}
 	if needsHostProxy(s.Device) && isSimulatorProcess(p) {
 		return s.decide(proxy.Attribution{Label: s.Device.Name, Origin: proxy.OriginDevice})
@@ -251,9 +262,10 @@ func (s *Session) attribute(ctx context.Context, clientAddr string) proxy.Attrib
 }
 
 // decide applies the scope: under ScopeDevice anything that is not the device passes through
-// untouched, so the rest of the machine behaves as if there were no proxy.
+// untouched, so the rest of the machine behaves as if there were no proxy. When the device IS this
+// machine, its own apps are the thing being watched, so everything is opened.
 func (s *Session) decide(a proxy.Attribution) proxy.Attribution {
-	if s.scope == ScopeAll {
+	if s.scope == ScopeAll || s.Device.IsHost() {
 		return a
 	}
 	a.Ignore = a.Origin != proxy.OriginDevice

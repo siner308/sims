@@ -61,10 +61,10 @@ func New(o Options) *cobra.Command {
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			switch device.Platform(c.platform) {
-			case "", device.PlatformAndroid, device.PlatformIOS:
+			case "", device.PlatformAndroid, device.PlatformIOS, device.PlatformDesktop:
 				return nil
 			}
-			return fmt.Errorf("--platform must be android or ios, not %q", c.platform)
+			return fmt.Errorf("--platform must be android, ios or desktop, not %q", c.platform)
 		},
 	}
 	root.SetVersionTemplate("sims {{.Version}}\n")
