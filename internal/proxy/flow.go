@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"sync"
@@ -48,8 +50,10 @@ type Flow struct {
 	StatusText string      `json:"statusText,omitempty"`
 	ReqHeader  http.Header `json:"requestHeaders,omitempty"`
 	RespHeader http.Header `json:"responseHeaders,omitempty"`
-	ReqBody    []byte      `json:"-"`
-	RespBody   []byte      `json:"-"`
+	// The bodies are held as they went over the wire, still compressed where the server compressed
+	// them. MarshalJSON decodes and renders them, since a caller wants what the app sent.
+	ReqBody  []byte `json:"-"`
+	RespBody []byte `json:"-"`
 	// sizes count what actually went through; the bodies above stop at the capture limit
 	ReqSize       int64 `json:"requestSize"`
 	RespSize      int64 `json:"responseSize"`
@@ -57,6 +61,34 @@ type Flow struct {
 	RespTruncated bool  `json:"responseTruncated,omitempty"`
 
 	Error string `json:"error,omitempty"`
+}
+
+// MarshalJSON adds the bodies, which the struct holds as raw wire bytes. Text is written as a
+// string and anything else as base64, so a caller never has to guess which it got.
+func (f Flow) MarshalJSON() ([]byte, error) {
+	type flowJSON Flow
+	out := struct {
+		flowJSON
+		RequestBody          string `json:"requestBody,omitempty"`
+		RequestBodyEncoding  string `json:"requestBodyEncoding,omitempty"`
+		ResponseBody         string `json:"responseBody,omitempty"`
+		ResponseBodyEncoding string `json:"responseBodyEncoding,omitempty"`
+	}{flowJSON: flowJSON(f)}
+	out.RequestBody, out.RequestBodyEncoding = encodeBody(f.ReqHeader, f.ReqBody)
+	out.ResponseBody, out.ResponseBodyEncoding = encodeBody(f.RespHeader, f.RespBody)
+	return json.Marshal(out)
+}
+
+// encodeBody decodes the content encoding and returns the body as text, or base64 when it is not.
+func encodeBody(h http.Header, body []byte) (string, string) {
+	if len(body) == 0 {
+		return "", ""
+	}
+	decoded := DecodeBody(h, body)
+	if IsText(decoded) {
+		return string(decoded), ""
+	}
+	return base64.StdEncoding.EncodeToString(decoded), "base64"
 }
 
 // liveFlow guards one Flow while the connection that owns it is still running.

@@ -248,6 +248,10 @@ sims doctor
 sims update [--check]
 ```
 
+`--json` prints a record per exchange with its headers and both bodies, decoded where the server
+compressed them; a body that is not text comes back base64 with `requestBodyEncoding` or
+`responseBodyEncoding` saying so. `--max-body` bounds how much of each is kept.
+
 `proxy run` prints one line per exchange and holds until ctrl+c (or `--for`), then puts the device and
 this machine back as they were. `--har` writes the flows in HAR 1.2. A simulator has no network
 settings of its own and follows this Mac's, so its capture points the Mac's web proxy at sims; other

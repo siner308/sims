@@ -75,7 +75,7 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 `--image` and `--type` accept an id or name from the matching `list`, but Android image names repeat across API levels (`google_apis_playstore arm64-v8a` exists for 30, 31, 35 and 36), so pass the Android image id. Without `--type` sims picks `pixel_7` on Android and `iPhone 17 Pro` on iOS, falling back to the newest iPhone or the first type that runs the image. `--ram`, `--cores` and `--disk` are refused on iOS. `--help` on any subcommand prints the exact flags of the installed version.
 
 `proxy run` holds until interrupted, so it needs `--for` or a `timeout`, exactly like the log streams.
-It prints one line per exchange (`--json` prints a record per flow) and restores the device and this
+It prints one line per exchange (`--json` prints a record per flow, headers and both bodies included: `requestBody` and `responseBody`, decoded from gzip/brotli, with `responseBodyEncoding: "base64"` when the body is not text) and restores the device and this
 machine on exit. An iOS simulator has no network settings of its own, so its capture points this Mac's
 web proxy at sims for as long as it runs; other apps on the Mac are relayed untouched and are not
 captured unless `--all` is given. In the TUI, `g` groups the captured traffic by domain, which is how a device's traffic is read when the app behind it is unknown. A device's connections do not say which app opened them, so traffic captured from a phone or an emulator is the whole device's; only a simulator or this machine names the sending process. Never report a captured request as a particular app's unless the flow's `process` field says so.

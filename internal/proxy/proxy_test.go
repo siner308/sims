@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -667,5 +668,72 @@ func TestUnknownEncodingIsLeftAlone(t *testing.T) {
 	raw := []byte("not really zstd")
 	if got := string(proxy.DecodeBody(h, raw)); got != string(raw) {
 		t.Errorf("DecodeBody changed a body it cannot decode: %q", got)
+	}
+}
+
+// --json is what a script or an agent reads, and a flow without its bodies only says how big they
+// were. Text comes back as text; anything else says it is base64 rather than leaving the caller to
+// guess.
+func TestFlowJSONCarriesTheBodies(t *testing.T) {
+	f := proxy.Flow{
+		Method: "POST", URL: "https://api.example.com/v1/log", Status: 200, Done: true,
+		ReqHeader:  http.Header{"Content-Type": []string{"application/json"}},
+		RespHeader: http.Header{"Content-Type": []string{"application/json"}},
+		ReqBody:    []byte(`{"event":"tap"}`),
+		RespBody:   []byte(`{"ok":true}`),
+		ReqSize:    15, RespSize: 11,
+	}
+	var got map[string]any
+	body, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["requestBody"] != `{"event":"tap"}` {
+		t.Errorf("requestBody = %v", got["requestBody"])
+	}
+	if got["responseBody"] != `{"ok":true}` {
+		t.Errorf("responseBody = %v", got["responseBody"])
+	}
+	if _, marked := got["requestBodyEncoding"]; marked {
+		t.Error("a text body was marked as encoded")
+	}
+	// the fields the table needs are still there
+	if got["url"] != f.URL || got["status"].(float64) != 200 {
+		t.Errorf("the record lost its own fields: %v", got)
+	}
+}
+
+// A compressed body is decoded for the reader, and a binary one is base64 with a marker.
+func TestFlowJSONDecodesAndMarksBodies(t *testing.T) {
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	io.WriteString(zw, `{"hello":"world"}`)
+	zw.Close()
+
+	f := proxy.Flow{
+		RespHeader: http.Header{"Content-Encoding": []string{"gzip"}, "Content-Type": []string{"application/json"}},
+		RespBody:   gz.Bytes(),
+	}
+	var got map[string]any
+	body, _ := json.Marshal(f)
+	json.Unmarshal(body, &got)
+	if got["responseBody"] != `{"hello":"world"}` {
+		t.Errorf("a gzip body was not decoded for the reader: %v", got["responseBody"])
+	}
+
+	binary := proxy.Flow{
+		RespHeader: http.Header{"Content-Type": []string{"image/png"}},
+		RespBody:   []byte{0x89, 0x50, 0x4e, 0x47, 0x00, 0x01},
+	}
+	body, _ = json.Marshal(binary)
+	json.Unmarshal(body, &got)
+	if got["responseBodyEncoding"] != "base64" {
+		t.Errorf("a binary body was not marked: %v", got["responseBodyEncoding"])
+	}
+	if _, err := base64.StdEncoding.DecodeString(got["responseBody"].(string)); err != nil {
+		t.Errorf("the marked body is not base64: %v", err)
 	}
 }
