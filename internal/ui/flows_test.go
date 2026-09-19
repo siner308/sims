@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"github.com/gdamore/tcell/v2"
 	"net/http"
 	"strings"
 	"testing"
@@ -344,4 +345,33 @@ func TestOpenAllTogglesEverything(t *testing.T) {
 
 	a.tv.QueueUpdate(func() { lv.openAll() })
 	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 0 })
+}
+
+// enter with nothing selected has to do something useful rather than nothing: the newest exchange is
+// what the reader is watching arrive.
+func TestEnterWithNoCursorOpensTheNewestExchange(t *testing.T) {
+	a, lv, s, stop := mergedView(t)
+	defer stop()
+
+	send(s, "GET", "https://a.example.com/old", 200, proxy.OriginDevice, "")
+	send(s, "GET", "https://b.example.com/newest", 200, proxy.OriginDevice, "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv.timeline.setFlows(s.Flows())
+		return len(lv.exchanges()) == 4
+	})
+
+	a.tv.QueueUpdate(func() { lv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)) })
+
+	var fv *flowView
+	waitFor(t, a, 5*time.Second, func() bool {
+		fv, _ = a.top().(*flowView)
+		return fv != nil
+	})
+	f, ok := s.Store.Get(fv.id)
+	if !ok {
+		t.Fatalf("flow %d is not in the store", fv.id)
+	}
+	if !strings.Contains(f.URL, "newest") {
+		t.Errorf("enter opened %q, want the newest exchange", f.URL)
+	}
 }

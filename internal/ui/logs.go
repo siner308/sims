@@ -527,8 +527,14 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	default:
 		switch ev.Key() {
 		case tcell.KeyEnter:
-			if f, ok := v.selectedFlow(); ok {
-				v.app.push(newFlowView(v.app, v.session, f.ID))
+			if v.mixing() {
+				// with nothing selected yet, enter takes the newest exchange rather than doing nothing
+				if v.cursor == "" {
+					v.step(true)
+				}
+				if f, ok := v.selectedFlow(); ok {
+					v.app.push(newFlowView(v.app, v.session, f.ID))
+				}
 				return nil
 			}
 		case tcell.KeyCtrlK:
