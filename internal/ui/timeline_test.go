@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +143,75 @@ func TestAndroidLineKeepsItsYearAcrossNewYear(t *testing.T) {
 	}
 	if at.After(ref) {
 		t.Errorf("a line already logged was placed in the future: %v is after %v", at, ref)
+	}
+}
+
+// Opening an exchange has to show the headers in place, then the body, then fold back. Reading a
+// request without its headers is the thing this feature exists to fix.
+func TestOpeningAnExchangeShowsHeadersThenBody(t *testing.T) {
+	f := proxy.Flow{
+		ID: 1, Method: "POST", URL: "https://api.example.com/v1/login",
+		Host: "api.example.com", Status: 200, Kind: proxy.KindHTTP, Done: true,
+		Start: time.Now(), Duration: 20 * time.Millisecond,
+		ReqHeader:  http.Header{"Content-Type": []string{"application/json"}, "Authorization": []string{"Bearer abc123"}},
+		RespHeader: http.Header{"Content-Type": []string{"application/json"}},
+		ReqBody:    []byte(`{"user":"kim"}`),
+		RespBody:   []byte(`{"token":"xyz"}`),
+		ReqSize:    14,
+		RespSize:   15,
+	}
+	req := entry{kind: entryRequest, flow: f, at: f.Start}
+	resp := entry{kind: entryResponse, flow: f, at: f.Start.Add(f.Duration)}
+
+	line := req.render("", detailLine)
+	if strings.Contains(line, "Authorization") {
+		t.Error("the one-line form is showing headers")
+	}
+
+	headers := req.render("", detailHeaders)
+	for _, want := range []string{"Authorization", "Bearer abc123", "Content-Type"} {
+		if !strings.Contains(headers, want) {
+			t.Errorf("opened headers are missing %q:\n%s", want, headers)
+		}
+	}
+	if strings.Contains(headers, `"user"`) {
+		t.Error("the headers level is already showing the body")
+	}
+
+	body := req.render("", detailBody)
+	if !strings.Contains(body, `"user": "kim"`) {
+		t.Errorf("the opened body is not pretty-printed:\n%s", body)
+	}
+
+	// the response half shows its own headers and body, not the request's
+	rb := resp.render("", detailBody)
+	if strings.Contains(rb, "Authorization") {
+		t.Error("the response is showing the request's headers")
+	}
+	if !strings.Contains(rb, `"token": "xyz"`) {
+		t.Errorf("the response body is missing:\n%s", rb)
+	}
+}
+
+// detail cycles and comes back round, so one key can both open and close.
+func TestDetailCycles(t *testing.T) {
+	got := []detail{detailLine}
+	for range 3 {
+		got = append(got, got[len(got)-1].next())
+	}
+	want := []detail{detailLine, detailHeaders, detailBody, detailLine}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("cycle = %v, want %v", got, want)
+		}
+	}
+}
+
+// A tunnel has no headers or body to show; opening it must not print an empty block as if it did.
+func TestTunnelHasNothingToOpen(t *testing.T) {
+	f := proxy.Flow{Kind: proxy.KindTunnel, Method: "CONNECT", Host: "pinned.example.com:443", Done: true, Error: "pinned"}
+	resp := entry{kind: entryResponse, flow: f, at: time.Now()}
+	if strings.Contains(resp.render("", detailBody), "no headers") {
+		t.Error("a tunnel response printed a header block")
 	}
 }

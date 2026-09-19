@@ -141,6 +141,31 @@ that, and got a 401 back" reads top to bottom instead of being matched across tw
 platforms' log timestamps are read for the ordering, and a line sims cannot date keeps the place it
 arrived in. `t` takes the traffic back out, `ctrl+k` stops the capture and leaves the log running.
 
+In that stream `n` and `shift+n` step between exchanges and `o` opens the one selected, in place:
+once for its headers, again for its body, a third time to fold it away. `shift+o` opens every
+exchange at once, for reading a whole conversation. The request and the response open separately,
+because each carries its own headers.
+
+```
+12:04:01.220  I/MyApp  ( 1234): tapped sign in
+12:04:01.244  → POST https://api.example.com/v1/login
+              Authorization: Bearer eyJhbGciOiJIUzI1NiJ9
+              Content-Type: application/json
+              body 43 B
+              {
+                "email": "kim@example.com",
+                "remember": true
+              }
+12:04:01.390  ← 200 66 B 146ms
+              Cache-Control: no-store
+              body 66 B
+              {
+                "token": "eyJ0eXAi",
+                "expiresIn": 3600
+              }
+12:04:01.402  I/MyApp  ( 1234): token stored
+```
+
 ### Images and new devices
 
 <p align="center">
@@ -252,7 +277,8 @@ sims skill > SKILL.md                   # for any other agent
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
 | logs | `/` `c` `p` `w` `g` `shift+g` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
 | logs | `t` | mix the device's traffic into the same stream, in time order; `t` again removes it |
-| logs+traffic | `enter` / `ctrl+k` | open the exchange nearest the cursor / stop the capture and keep the log |
+| logs+traffic | `n` / `shift+n` / `o` / `shift+o` | step to the next exchange, the previous one, open the selected one (headers, then body, then closed), open or close every exchange |
+| logs+traffic | `enter` / `ctrl+k` | the selected exchange on its own screen / stop the capture and keep the log |
 | proxy | `l` | show these exchanges in the log's stream instead of the table |
 | images | `n` or `enter` / `i` / `s` | new device from image / install image (android) / show downloadable images |
 

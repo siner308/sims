@@ -17,6 +17,10 @@ import (
 	"github.com/siner308/sims/internal/proxy"
 )
 
+// cursorMark sits in front of the selected exchange, so which row the keys act on is visible even
+// where a terminal renders the region highlight faintly.
+const cursorMark = "[dodgerblue]\u25b8[-]"
+
 const (
 	logBuffer    = 5000
 	pumpInterval = 100 * time.Millisecond
@@ -40,11 +44,18 @@ type logsView struct {
 	timeline *timeline
 	session  *capture.Session
 	watchOff chan struct{}
+	// cursor is the id of the exchange the reader has stepped to, empty when none is selected.
+	cursor string
+	// opened says how much of each exchange is shown; the cursor's own level is kept separately so
+	// opening one does not open every one.
+	opened map[string]detail
 }
 
 func newLogsView(a *App, d device.Device, only *device.App) *logsView {
-	v := &logsView{app: a, dev: d, only: only}
+	v := &logsView{app: a, dev: d, only: only, opened: map[string]detail{}}
 	v.text = tview.NewTextView().SetDynamicColors(true).SetScrollable(true).SetMaxLines(logBuffer)
+	// regions mark each exchange so n and N can step between them and o can open the one selected
+	v.text.SetRegions(true)
 	v.text.SetBorder(true).SetTitle(v.title())
 	v.text.SetInputCapture(v.onKey)
 	return v
@@ -65,7 +76,11 @@ func (v *logsView) Primitive() tview.Primitive { return v.text }
 func (v *logsView) Hints() []hint {
 	hints := []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"}}
 	if v.mixing() {
-		return append(hints, groupBreak, hint{"t", "hide traffic"}, hint{"enter", "inspect request"}, hint{"ctrl+k", "stop capture"})
+		return append(hints, groupBreak,
+			hint{"n", "next exchange"}, hint{"shift+n", "previous"}, hint{"o", "open headers, then body"},
+			hint{"O", "open every exchange"}, hint{"enter", "full screen"},
+			groupBreak,
+			hint{"t", "hide traffic"}, hint{"ctrl+k", "stop capture"})
 	}
 	return append(hints, groupBreak, hint{"t", "mix in traffic"})
 }
@@ -140,22 +155,118 @@ func (v *logsView) unwatchTraffic() {
 	}
 }
 
-// selectedFlow is the exchange on the line the cursor sits on, for enter to open.
+// exchanges are the entries in the stream that are requests or responses, in the order shown.
+func (v *logsView) exchanges() []entry {
+	var out []entry
+	for _, e := range v.visibleEntries() {
+		if e.kind != entryLog {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// entryID names one row so a region can point at it: an exchange is identified by its flow and
+// which half it is, since a request and its response are separate rows.
+func entryID(e entry) string {
+	if e.kind == entryLog {
+		return ""
+	}
+	half := "req"
+	if e.kind == entryResponse {
+		half = "resp"
+	}
+	return fmt.Sprintf("%s-%d", half, e.flow.ID)
+}
+
+// selectedFlow is the exchange the cursor is on.
 func (v *logsView) selectedFlow() (proxy.Flow, bool) {
-	if !v.mixing() {
+	if !v.mixing() || v.cursor == "" {
 		return proxy.Flow{}, false
 	}
-	row, _ := v.text.GetScrollOffset()
-	_, _, _, height := v.text.GetInnerRect()
-	visible := v.visibleEntries()
-	// the last exchange on screen is the one the reader is looking at
-	end := min(row+height, len(visible))
-	for i := end - 1; i >= 0 && i >= row; i-- {
-		if visible[i].kind != entryLog {
-			return visible[i].flow, true
+	for _, e := range v.exchanges() {
+		if entryID(e) == v.cursor {
+			return e.flow, true
 		}
 	}
 	return proxy.Flow{}, false
+}
+
+// step moves the cursor to the next exchange in the stream, or the previous one. With no cursor yet
+// it starts at the last exchange, which is the one the reader is watching arrive.
+func (v *logsView) step(forward bool) {
+	if !v.mixing() {
+		return
+	}
+	ex := v.exchanges()
+	if len(ex) == 0 {
+		v.app.flash("no exchanges yet")
+		return
+	}
+	at := -1
+	for i, e := range ex {
+		if entryID(e) == v.cursor {
+			at = i
+			break
+		}
+	}
+	switch {
+	case at < 0:
+		at = len(ex) - 1
+	case forward:
+		at = min(at+1, len(ex)-1)
+	default:
+		at = max(at-1, 0)
+	}
+	v.cursor = entryID(ex[at])
+	v.redraw()
+	v.text.Highlight(v.cursor)
+	v.text.ScrollToHighlight()
+}
+
+// openMore shows more of the selected exchange in place: its headers, then its body, then back to
+// the one-line form.
+func (v *logsView) openMore() {
+	if !v.mixing() {
+		return
+	}
+	if v.cursor == "" {
+		v.step(true)
+		if v.cursor == "" {
+			return
+		}
+	}
+	next := v.opened[v.cursor].next()
+	if next == detailLine {
+		delete(v.opened, v.cursor)
+	} else {
+		v.opened[v.cursor] = next
+	}
+	v.redraw()
+	v.text.Highlight(v.cursor)
+	v.text.ScrollToHighlight()
+}
+
+// openAll opens every exchange at once, for reading a whole conversation rather than one call.
+func (v *logsView) openAll() {
+	if !v.mixing() {
+		return
+	}
+	ex := v.exchanges()
+	if len(ex) == 0 {
+		return
+	}
+	// if anything is open, closing everything is what the key should do
+	if len(v.opened) > 0 {
+		v.opened = map[string]detail{}
+		v.app.flash("closed every exchange")
+	} else {
+		for _, e := range ex {
+			v.opened[entryID(e)] = detailBody
+		}
+		v.app.flash(fmt.Sprintf("opened %d exchanges", len(ex)))
+	}
+	v.redraw()
 }
 
 func (v *logsView) visibleEntries() []entry {
@@ -323,7 +434,17 @@ func (v *logsView) redraw() {
 	v.text.Clear()
 	if v.mixing() {
 		for _, e := range v.visibleEntries() {
-			fmt.Fprintln(v.text, e.render(v.filter))
+			id := entryID(e)
+			if id == "" {
+				fmt.Fprintln(v.text, e.render(v.filter, detailLine))
+				continue
+			}
+			text := e.render(v.filter, v.opened[id])
+			if id == v.cursor {
+				text = cursorMark + text
+			}
+			// the region wraps the whole entry so ScrollToHighlight lands on its first line
+			fmt.Fprintf(v.text, "[\"%s\"]%s[\"\"]\n", id, text)
 		}
 	} else {
 		v.mu.Lock()
@@ -339,6 +460,9 @@ func (v *logsView) redraw() {
 		v.text.ScrollToEnd()
 	} else {
 		v.text.ScrollTo(row, 0)
+	}
+	if v.cursor != "" {
+		v.text.Highlight(v.cursor)
 	}
 	title := v.title()
 	if v.filter != "" {
@@ -392,6 +516,14 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.Refresh()
 	case 't':
 		v.toggleTraffic()
+	case 'n':
+		v.step(true)
+	case 'N':
+		v.step(false)
+	case 'o':
+		v.openMore()
+	case 'O':
+		v.openAll()
 	default:
 		switch ev.Key() {
 		case tcell.KeyEnter:

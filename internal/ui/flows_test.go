@@ -247,3 +247,101 @@ func TestTogglingTrafficOffLeavesTheLog(t *testing.T) {
 		t.Error("hiding the traffic stopped the capture")
 	}
 }
+
+// mergedView builds a logs view already mixing traffic, with the log stream stubbed out.
+func mergedView(t *testing.T) (*App, *logsView, *capture.Session, func()) {
+	t.Helper()
+	a, v, s, stop := startFlowsView(t)
+	a.tv.QueueUpdate(func() { v.mixWithLog() })
+	var lv *logsView
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv, _ = a.top().(*logsView)
+		return lv != nil && lv.mixing()
+	})
+	return a, lv, s, stop
+}
+
+// Stepping has to land on a specific exchange. The first version guessed from the scroll position,
+// which picked the wrong row whenever the reader had scrolled.
+func TestSteppingSelectsExchangesInOrder(t *testing.T) {
+	a, lv, s, stop := mergedView(t)
+	defer stop()
+
+	send(s, "GET", "https://a.example.com/first", 200, proxy.OriginDevice, "")
+	send(s, "POST", "https://b.example.com/second", 201, proxy.OriginDevice, "")
+	// waitFor runs its condition on the UI goroutine already; queueing from inside it would deadlock
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv.timeline.setFlows(s.Flows())
+		return len(lv.exchanges()) == 4 // two exchanges, a request and a response each
+	})
+
+	// with nothing selected, n starts at the newest exchange
+	a.tv.QueueUpdate(func() { lv.step(true) })
+	var got proxy.Flow
+	waitFor(t, a, 5*time.Second, func() bool {
+		f, ok := lv.selectedFlow()
+		got = f
+		return ok
+	})
+	if !strings.Contains(got.URL, "second") {
+		t.Errorf("n with no cursor selected %q, want the newest", got.URL)
+	}
+
+	// shift+n walks back through the stream
+	a.tv.QueueUpdate(func() { lv.step(false); lv.step(false) })
+	waitFor(t, a, 5*time.Second, func() bool {
+		f, ok := lv.selectedFlow()
+		got = f
+		return ok && strings.Contains(f.URL, "first")
+	})
+	if !strings.Contains(got.URL, "first") {
+		t.Errorf("stepping back reached %q", got.URL)
+	}
+}
+
+// o opens the selected exchange in place and leaves the others alone.
+func TestOpenAffectsOnlyTheSelectedExchange(t *testing.T) {
+	a, lv, s, stop := mergedView(t)
+	defer stop()
+
+	send(s, "GET", "https://a.example.com/one", 200, proxy.OriginDevice, "")
+	send(s, "GET", "https://b.example.com/two", 200, proxy.OriginDevice, "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv.timeline.setFlows(s.Flows())
+		return len(lv.exchanges()) == 4
+	})
+
+	a.tv.QueueUpdate(func() { lv.step(true); lv.openMore() })
+	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 1 })
+
+	var opened int
+	a.tv.QueueUpdate(func() { opened = len(lv.opened) })
+	if opened != 1 {
+		t.Errorf("opened %d exchanges, want just the selected one", opened)
+	}
+
+	// o again goes to the body, a third time folds it back
+	a.tv.QueueUpdate(func() { lv.openMore() })
+	waitFor(t, a, 5*time.Second, func() bool { return lv.opened[lv.cursor] == detailBody })
+	a.tv.QueueUpdate(func() { lv.openMore() })
+	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 0 })
+}
+
+// shift+O opens everything, and again closes everything: reading a whole conversation at once.
+func TestOpenAllTogglesEverything(t *testing.T) {
+	a, lv, s, stop := mergedView(t)
+	defer stop()
+
+	send(s, "GET", "https://a.example.com/one", 200, proxy.OriginDevice, "")
+	send(s, "GET", "https://b.example.com/two", 200, proxy.OriginDevice, "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv.timeline.setFlows(s.Flows())
+		return len(lv.exchanges()) == 4
+	})
+
+	a.tv.QueueUpdate(func() { lv.openAll() })
+	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 4 })
+
+	a.tv.QueueUpdate(func() { lv.openAll() })
+	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 0 })
+}

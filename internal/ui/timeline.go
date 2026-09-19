@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,36 @@ import (
 
 	"github.com/siner308/sims/internal/proxy"
 )
+
+// detail is how much of an exchange the stream shows in place. The list is ordered, so a key can
+// step through it.
+type detail int
+
+const (
+	// detailLine is the one-line summary: method, url, status, timing.
+	detailLine detail = iota
+	// detailHeaders adds the headers of whichever half the row is.
+	detailHeaders
+	// detailBody adds the body too, pretty-printed.
+	detailBody
+)
+
+func (d detail) next() detail {
+	if d == detailBody {
+		return detailLine
+	}
+	return d + 1
+}
+
+func (d detail) String() string {
+	switch d {
+	case detailHeaders:
+		return "headers"
+	case detailBody:
+		return "headers+body"
+	}
+	return "one line"
+}
 
 // entryKind says which stream a timeline row came from.
 type entryKind int
@@ -160,19 +192,68 @@ func stripLogTime(line string) string {
 	return line
 }
 
-// render is the one line this entry contributes, already coloured for tview.
-func (e entry) render(filter string) string {
+// render is what this entry contributes to the stream: one line, or that line followed by the
+// headers and body when the reader has opened it.
+func (e entry) render(filter string, d detail) string {
 	stamp := fmt.Sprintf("[gray]%s[-]", e.at.Format("15:04:05.000"))
 	switch e.kind {
 	case entryRequest:
-		return fmt.Sprintf("%s  [aqua]→[-] %s %s",
+		head := fmt.Sprintf("%s  [aqua]→[-] %s %s",
 			stamp, highlight(e.flow.Method, filter), highlight(requestLabel(e.flow), filter))
+		return head + detailBlock(d, e.flow.ReqHeader, e.flow.ReqBody, e.flow.ReqSize, e.flow.ReqTruncated)
 	case entryResponse:
-		return fmt.Sprintf("%s  %s %s %s %s",
+		head := fmt.Sprintf("%s  %s %s %s %s",
 			stamp, responseArrow(e.flow), statusCell(e.flow),
 			proxy.SizeString(e.flow.RespSize), responseNote(e.flow))
+		if e.flow.Kind == proxy.KindTunnel {
+			return head
+		}
+		return head + detailBlock(d, e.flow.RespHeader, e.flow.RespBody, e.flow.RespSize, e.flow.RespTruncated)
 	}
 	return fmt.Sprintf("%s  %s", stamp, highlight(stripLogTime(e.text), filter))
+}
+
+// detailIndent lines the opened text up under the summary rather than against the left edge, so the
+// stream still reads as a stream.
+const detailIndent = "              "
+
+// detailBlock is the headers, and then the body, that an opened exchange shows under its summary.
+func detailBlock(d detail, header http.Header, body []byte, size int64, truncated bool) string {
+	if d == detailLine {
+		return ""
+	}
+	var b strings.Builder
+	keys := make([]string, 0, len(header))
+	for k := range header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		for _, val := range header[k] {
+			fmt.Fprintf(&b, "\n%s[aqua]%s:[-] %s", detailIndent, tview.Escape(k), tview.Escape(val))
+		}
+	}
+	if len(keys) == 0 {
+		fmt.Fprintf(&b, "\n%s[gray]no headers[-]", detailIndent)
+	}
+	if d != detailBody {
+		if size > 0 {
+			fmt.Fprintf(&b, "\n%s[gray]body %s, press o again to read it[-]", detailIndent, proxy.SizeString(size))
+		}
+		return b.String()
+	}
+	if size == 0 {
+		fmt.Fprintf(&b, "\n%s[gray]no body[-]", detailIndent)
+		return b.String()
+	}
+	fmt.Fprintf(&b, "\n%s[gray]body %s[-]", detailIndent, proxy.SizeString(size))
+	for _, line := range strings.Split(proxy.Pretty(header, body), "\n") {
+		fmt.Fprintf(&b, "\n%s%s", detailIndent, tview.Escape(line))
+	}
+	if truncated {
+		fmt.Fprintf(&b, "\n%s[gray]...the rest was not kept[-]", detailIndent)
+	}
+	return b.String()
 }
 
 func requestLabel(f proxy.Flow) string {
