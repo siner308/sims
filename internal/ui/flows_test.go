@@ -375,3 +375,26 @@ func TestEnterWithNoCursorOpensTheNewestExchange(t *testing.T) {
 		t.Errorf("enter opened %q, want the newest exchange", f.URL)
 	}
 }
+
+// With nothing selected, n should land on the newest request, not on its response: the request is
+// what a reader is looking for, and the response is on the next line.
+func TestFirstStepLandsOnTheRequest(t *testing.T) {
+	a, lv, s, stop := mergedView(t)
+	defer stop()
+
+	send(s, "POST", "https://api.example.com/v1/login", 200, proxy.OriginDevice, "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv.timeline.setFlows(s.Flows())
+		return len(lv.exchanges()) == 2
+	})
+
+	a.tv.QueueUpdate(func() { lv.step(true) })
+	var cursor string
+	waitFor(t, a, 5*time.Second, func() bool {
+		cursor = lv.cursor
+		return cursor != ""
+	})
+	if !strings.HasPrefix(cursor, "req-") {
+		t.Errorf("the first step selected %q, want the request", cursor)
+	}
+}

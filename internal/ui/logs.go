@@ -212,7 +212,17 @@ func (v *logsView) step(forward bool) {
 	}
 	switch {
 	case at < 0:
+		// nothing selected yet: start at the newest exchange, on its request rather than its
+		// response, because a reader wants the call and the response sits on the next line anyway
 		at = len(ex) - 1
+		if ex[at].kind == entryResponse {
+			for i := at - 1; i >= 0; i-- {
+				if ex[i].kind == entryRequest && ex[i].flow.ID == ex[at].flow.ID {
+					at = i
+					break
+				}
+			}
+		}
 	case forward:
 		at = min(at+1, len(ex)-1)
 	default:

@@ -11,9 +11,13 @@ import (
 	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/andybalholm/brotli"
 )
 
-// DecodeBody undoes gzip or deflate content encoding for display; anything else comes back as is.
+// DecodeBody undoes the content encoding for display; an encoding sims does not know comes back as
+// is. Brotli is here because most HTTPS sites now default to it, and an undecoded body reads as
+// "(binary)" in the flow detail, which looks like the proxy failed.
 func DecodeBody(h http.Header, body []byte) []byte {
 	if len(body) == 0 {
 		return body
@@ -28,6 +32,8 @@ func DecodeBody(h http.Header, body []byte) []byte {
 		r = zr
 	case "deflate":
 		r = flate.NewReader(bytes.NewReader(body))
+	case "br":
+		r = brotli.NewReader(bytes.NewReader(body))
 	default:
 		return body
 	}

@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andybalholm/brotli"
+
 	"github.com/siner308/sims/internal/proxy"
 )
 
@@ -638,5 +640,32 @@ func TestFreshKeyIsPrivate(t *testing.T) {
 	}
 	if mode := info.Mode().Perm(); mode&0o077 != 0 {
 		t.Errorf("a new key is written %04o", mode)
+	}
+}
+
+// Most HTTPS sites answer in brotli now. Without a decoder every one of those bodies reads as
+// "(binary)" in the detail, which looks like the proxy failed rather than like a missing codec.
+func TestBrotliBodyIsReadable(t *testing.T) {
+	var buf bytes.Buffer
+	bw := brotli.NewWriter(&buf)
+	if _, err := io.WriteString(bw, `{"hello":"world"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	h := http.Header{"Content-Encoding": []string{"br"}, "Content-Type": []string{"application/json"}}
+	got := proxy.Pretty(h, buf.Bytes())
+	if !strings.Contains(got, `"hello": "world"`) {
+		t.Errorf("a brotli body rendered as %q", got)
+	}
+}
+
+// An encoding sims has no decoder for must not be mangled: the raw bytes come back untouched.
+func TestUnknownEncodingIsLeftAlone(t *testing.T) {
+	h := http.Header{"Content-Encoding": []string{"zstd"}}
+	raw := []byte("not really zstd")
+	if got := string(proxy.DecodeBody(h, raw)); got != string(raw) {
+		t.Errorf("DecodeBody changed a body it cannot decode: %q", got)
 	}
 }
