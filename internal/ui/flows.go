@@ -48,7 +48,7 @@ func (v *flowsView) Primitive() tview.Primitive { return v.table }
 func (v *flowsView) Hints() []hint {
 	return []hint{
 		{"enter", "inspect"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
-		{"d", "device only"}, {"s", "save har"},
+		{"d", "device only"}, {"s", "save har"}, {"l", "mix with the log"},
 		groupBreak,
 		{"ctrl+k", "stop capture"}, {"esc", "back (keeps capturing)"},
 	}
@@ -304,12 +304,23 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.render()
 	case 's':
 		v.saveHAR()
+	case 'l':
+		v.mixWithLog()
 	case 'r':
 		v.reload()
 	default:
 		return ev
 	}
 	return nil
+}
+
+// mixWithLog swaps the table for the merged stream, where the same exchanges appear between the log
+// lines around them. The capture keeps running; only the way it is shown changes.
+func (v *flowsView) mixWithLog() {
+	v.close()
+	logs := newLogsView(v.app, v.dev, nil)
+	logs.session = v.session
+	v.app.replaceTop(logs)
 }
 
 func (v *flowsView) stopCapture() {

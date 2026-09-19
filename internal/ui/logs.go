@@ -12,7 +12,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/proxy"
 )
 
 const (
@@ -33,6 +35,11 @@ type logsView struct {
 	nowrap bool
 	// waiting is set while the runner shows in the status bar; only the UI goroutine touches it
 	waiting bool
+
+	// timeline holds both streams in time order while traffic is mixed in; nil means logs alone.
+	timeline *timeline
+	session  *capture.Session
+	watchOff chan struct{}
 }
 
 func newLogsView(a *App, d device.Device, only *device.App) *logsView {
@@ -43,19 +50,145 @@ func newLogsView(a *App, d device.Device, only *device.App) *logsView {
 	return v
 }
 
-func (v *logsView) Name() string               { return "logs" }
+// mixing reports whether the device's traffic is being shown alongside the log.
+func (v *logsView) mixing() bool { return v.session != nil }
+
+func (v *logsView) Name() string {
+	if v.mixing() {
+		return "logs+traffic"
+	}
+	return "logs"
+}
+
 func (v *logsView) Primitive() tview.Primitive { return v.text }
+
 func (v *logsView) Hints() []hint {
-	return []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"}}
+	hints := []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"}}
+	if v.mixing() {
+		return append(hints, groupBreak, hint{"t", "hide traffic"}, hint{"enter", "inspect request"}, hint{"ctrl+k", "stop capture"})
+	}
+	return append(hints, groupBreak, hint{"t", "mix in traffic"})
+}
+
+// close stops the log stream and the traffic follower; whatever takes the view off the stack calls it.
+func (v *logsView) close() {
+	v.stop()
+	v.unwatchTraffic()
+}
+
+// toggleTraffic mixes the device's exchanges into the log, or takes them back out. Turning it on
+// starts a capture when none is running, which changes settings on the device, so it asks first.
+func (v *logsView) toggleTraffic() {
+	if v.mixing() {
+		v.unwatchTraffic()
+		v.session = nil
+		v.timeline = nil
+		v.app.drawHeader()
+		v.Refresh()
+		return
+	}
+	withCapture(v.app, v.dev, func(s *capture.Session) {
+		v.session = s
+		v.app.drawHeader()
+		v.Refresh()
+	})
+}
+
+// watchTraffic follows the capture's store on a timer, the same way the flows view does: a busy app
+// changes it hundreds of times a second and the text is rebuilt on each redraw.
+func (v *logsView) watchTraffic() {
+	v.unwatchTraffic()
+	v.watchOff = make(chan struct{})
+	off, session := v.watchOff, v.session
+	go func() {
+		// the session is read here and never again from this goroutine: the view's own fields belong
+		// to the UI goroutine, and the callback below runs there
+		store := session.Store
+		tick := time.NewTicker(redrawInterval)
+		defer tick.Stop()
+		changed := store.Changed()
+		dirty := true
+		for {
+			select {
+			case <-off:
+				return
+			case <-changed:
+				dirty = true
+				changed = store.Changed()
+			case <-tick.C:
+				if !dirty {
+					continue
+				}
+				dirty = false
+				v.app.tv.QueueUpdateDraw(func() {
+					// by the time this runs the traffic may have been switched off
+					if v.session != session || v.paused {
+						return
+					}
+					v.timeline.setFlows(session.Flows())
+					v.redraw()
+				})
+			}
+		}
+	}()
+}
+
+func (v *logsView) unwatchTraffic() {
+	if v.watchOff != nil {
+		close(v.watchOff)
+		v.watchOff = nil
+	}
+}
+
+// selectedFlow is the exchange on the line the cursor sits on, for enter to open.
+func (v *logsView) selectedFlow() (proxy.Flow, bool) {
+	if !v.mixing() {
+		return proxy.Flow{}, false
+	}
+	row, _ := v.text.GetScrollOffset()
+	_, _, _, height := v.text.GetInnerRect()
+	visible := v.visibleEntries()
+	// the last exchange on screen is the one the reader is looking at
+	end := min(row+height, len(visible))
+	for i := end - 1; i >= 0 && i >= row; i-- {
+		if visible[i].kind != entryLog {
+			return visible[i].flow, true
+		}
+	}
+	return proxy.Flow{}, false
+}
+
+func (v *logsView) visibleEntries() []entry {
+	var out []entry
+	for _, e := range v.timeline.all() {
+		if e.matches(v.filter) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func (v *logsView) Refresh() {
+	if v.mixing() {
+		if v.timeline == nil {
+			v.timeline = newTimeline(logBuffer)
+			// whatever the capture already collected belongs on the timeline too
+			v.timeline.setFlows(v.session.Flows())
+		}
+		v.watchTraffic()
+	}
 	v.stop()
 	ctx, cancel := context.WithCancel(v.app.ctx)
 	v.cancel = cancel
 	cmd, err := v.app.m.LogCmd(ctx, v.dev, v.only)
 	if err != nil {
 		v.app.flashErr(err)
+		return
+	}
+	if cmd == nil {
+		// a provider with no log stream for this device: the view still works for whatever else it
+		// shows, so this is a note rather than a crash
+		v.app.flash("no log stream for " + v.dev.Name)
 		return
 	}
 	out, err := cmd.StdoutPipe()
@@ -160,6 +293,17 @@ func (v *logsView) append(chunk []string) {
 		v.lines = v.lines[len(v.lines)-logBuffer:]
 	}
 	v.mu.Unlock()
+	if v.mixing() {
+		now := time.Now()
+		for _, l := range chunk {
+			v.timeline.addLog(l, now)
+		}
+		if !v.paused {
+			// a new line can land before an exchange already on the timeline, so the whole text is rebuilt
+			v.redraw()
+		}
+		return
+	}
 	if v.paused {
 		return
 	}
@@ -177,12 +321,18 @@ func (v *logsView) redraw() {
 	_, _, _, height := v.text.GetInnerRect()
 	atEnd := row+height >= v.text.GetOriginalLineCount()
 	v.text.Clear()
-	v.mu.Lock()
-	lines := append([]string(nil), v.lines...)
-	v.mu.Unlock()
-	for _, l := range lines {
-		if v.filter == "" || strings.Contains(strings.ToLower(l), strings.ToLower(v.filter)) {
-			fmt.Fprintln(v.text, highlight(l, v.filter))
+	if v.mixing() {
+		for _, e := range v.visibleEntries() {
+			fmt.Fprintln(v.text, e.render(v.filter))
+		}
+	} else {
+		v.mu.Lock()
+		lines := append([]string(nil), v.lines...)
+		v.mu.Unlock()
+		for _, l := range lines {
+			if v.filter == "" || strings.Contains(strings.ToLower(l), strings.ToLower(v.filter)) {
+				fmt.Fprintln(v.text, highlight(l, v.filter))
+			}
 		}
 	}
 	if atEnd {
@@ -204,10 +354,14 @@ func (v *logsView) redraw() {
 }
 
 func (v *logsView) title() string {
-	if v.only != nil {
-		return fmt.Sprintf(" logs @ %s / %s ", v.dev.Name, v.only.Name)
+	what := "logs"
+	if v.mixing() {
+		what = fmt.Sprintf("logs+traffic :%d", v.session.Port)
 	}
-	return fmt.Sprintf(" logs @ %s ", v.dev.Name)
+	if v.only != nil {
+		return fmt.Sprintf(" %s @ %s / %s ", what, v.dev.Name, v.only.Name)
+	}
+	return fmt.Sprintf(" %s @ %s ", what, v.dev.Name)
 }
 
 func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
@@ -218,6 +372,10 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.mu.Lock()
 		v.lines = nil
 		v.mu.Unlock()
+		if v.mixing() {
+			v.timeline.clear()
+			v.session.Store.Clear()
+		}
 		v.text.Clear()
 	case 'p':
 		v.paused = !v.paused
@@ -232,11 +390,38 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.text.ScrollToEnd()
 	case 'r':
 		v.Refresh()
+	case 't':
+		v.toggleTraffic()
 	default:
-		if ev.Key() == tcell.KeyEscape {
+		switch ev.Key() {
+		case tcell.KeyEnter:
+			if f, ok := v.selectedFlow(); ok {
+				v.app.push(newFlowView(v.app, v.session, f.ID))
+				return nil
+			}
+		case tcell.KeyCtrlK:
+			if v.mixing() {
+				v.stopCapture()
+				return nil
+			}
+		case tcell.KeyEscape:
 			v.stop()
 		}
 		return ev
 	}
 	return nil
+}
+
+// stopCapture ends the capture and leaves the log running on its own.
+func (v *logsView) stopCapture() {
+	d := v.dev
+	v.app.confirm(fmt.Sprintf("stop capturing %s?\n\n%s", d.Name, stopNote(d)), func() {
+		v.unwatchTraffic()
+		v.session, v.timeline = nil, nil
+		v.app.async(func() error { return v.app.m.StopCapture(d) }, func() {
+			v.app.flash("stopped capturing " + d.Name + "; the log keeps running")
+			v.app.drawHeader()
+			v.Refresh()
+		})
+	})
 }

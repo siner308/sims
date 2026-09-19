@@ -420,27 +420,33 @@ const pairingGuide = "Before answering yes:\n" +
 	"2. For a phone this Mac has never seen, it is plugged in over USB and you tapped Trust\n" +
 	"3. Then accept the pairing prompt that appears on the phone"
 
-// watchTraffic opens the flows of a running capture, or explains what starting one will change and
-// then starts it. Both device paths land in the same view.
+// watchTraffic opens the flows of a running capture, or starts one first. Both device paths land in
+// the same view.
 func (v *devicesView) watchTraffic() {
 	d, ok := v.selected()
 	if !ok {
 		return
 	}
-	if s, running := v.app.m.Capture(d); running {
-		v.app.push(newFlowsView(v.app, d, s))
+	withCapture(v.app, d, func(s *capture.Session) { v.app.push(newFlowsView(v.app, d, s)) })
+}
+
+// withCapture hands then a running capture for d: the one already going, or a new one once the user
+// has agreed to what starting it changes on the device.
+func withCapture(a *App, d device.Device, then func(*capture.Session)) {
+	if s, running := a.m.Capture(d); running {
+		then(s)
 		return
 	}
-	if !v.app.m.CanCapture(d) {
-		v.app.flashErr(fmt.Errorf("%s cannot be pointed at a proxy from here", d.Platform))
+	if !a.m.CanCapture(d) {
+		a.flashErr(fmt.Errorf("%s cannot be pointed at a proxy from here", d.Platform))
 		return
 	}
 	if !d.Reachable() {
-		v.app.flashErr(fmt.Errorf("%s is %s; boot or connect it first", d.Name, strings.ToLower(string(d.State))))
+		a.flashErr(fmt.Errorf("%s is %s; boot or connect it first", d.Name, strings.ToLower(string(d.State))))
 		return
 	}
-	v.app.confirm(fmt.Sprintf("watch %s's traffic?\n\n%s", d.Name, captureNote(d)), func() {
-		v.app.startCapture(d, capture.ScopeDevice, func(s *capture.Session) { v.app.push(newFlowsView(v.app, d, s)) })
+	a.confirm(fmt.Sprintf("watch %s's traffic?\n\n%s", d.Name, captureNote(d)), func() {
+		a.startCapture(d, capture.ScopeDevice, then)
 	})
 }
 

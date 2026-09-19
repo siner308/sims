@@ -5,8 +5,9 @@ description: >
   instead of raw adb, emulator, avdmanager, sdkmanager, xcrun simctl or xcrun devicectl. Use this
   skill whenever a task touches a mobile device from the command line: listing or booting an
   emulator or simulator, creating or deleting one, wiping it, installing an .apk or .app, launching
-  an app, tailing device or app logs, watching a device's HTTP traffic through a proxy, pairing or
-  connecting a phone over wifi, or checking the Android SDK and Xcode toolchain. Trigger even when the user names the underlying tool ("run adb
+  an app, tailing device or app logs, watching a device's HTTP traffic through a proxy (on its own or
+  interleaved with the log), pairing or connecting a phone over wifi, or checking the Android SDK and
+  Xcode toolchain. Trigger even when the user names the underlying tool ("run adb
   install", "boot the simulator with simctl", "create an AVD") or a device by name ("Pixel_7",
   "iPhone 16", "my phone"), as long as `sims` is installed or can be installed.
 ---

@@ -135,6 +135,12 @@ What sims could not read is still listed rather than hidden. An app that pins it
 every proxy, sims included; those rows show as `tunnel` and say why, which is the difference between
 a limit and a bug.
 
+Press `t` again from the log, or `l` from the traffic table, and the two run as one stream in time
+order: each request lands between the log lines that surround it, so "the app logged this, then sent
+that, and got a 401 back" reads top to bottom instead of being matched across two screens. Both
+platforms' log timestamps are read for the ordering, and a line sims cannot date keeps the place it
+arrived in. `t` takes the traffic back out, `ctrl+k` stops the capture and leaves the log running.
+
 ### Images and new devices
 
 <p align="center">
@@ -245,6 +251,9 @@ sims skill > SKILL.md                   # for any other agent
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
 | logs | `/` `c` `p` `w` `g` `shift+g` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
+| logs | `t` | mix the device's traffic into the same stream, in time order; `t` again removes it |
+| logs+traffic | `enter` / `ctrl+k` | open the exchange nearest the cursor / stop the capture and keep the log |
+| proxy | `l` | show these exchanges in the log's stream instead of the table |
 | images | `n` or `enter` / `i` / `s` | new device from image / install image (android) / show downloadable images |
 
 Filtering works the same everywhere: `/` opens an empty prompt, `enter` applies the text as a case-insensitive substring match and highlights every hit in the rows (or log lines) that pass, an empty `enter` clears the filter, and `esc` leaves the current filter alone.

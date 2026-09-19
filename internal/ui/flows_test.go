@@ -189,3 +189,61 @@ func TestPopClosesTheFlowsView(t *testing.T) {
 	a.tv.QueueUpdate(func() { a.pop() })
 	waitFor(t, a, 5*time.Second, func() bool { return v.stop == nil })
 }
+
+// l on the traffic table moves to the merged stream without disturbing the capture: the same
+// exchanges, now between the log lines they happened around.
+func TestMixWithLogKeepsTheCaptureRunning(t *testing.T) {
+	a, v, s, stop := startFlowsView(t)
+	defer stop()
+
+	send(s, "GET", "https://api.example.com/v1/me", 200, proxy.OriginDevice, "")
+	waitFor(t, a, 5*time.Second, func() bool { return len(v.visible()) == 1 })
+
+	a.tv.QueueUpdate(func() { v.mixWithLog() })
+
+	var lv *logsView
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv, _ = a.top().(*logsView)
+		return lv != nil
+	})
+	var mixing bool
+	var entries int
+	waitFor(t, a, 5*time.Second, func() bool {
+		mixing = lv.mixing()
+		if lv.timeline != nil {
+			entries = len(lv.timeline.all())
+		}
+		return mixing && entries > 0
+	})
+	if _, running := a.m.Capture(emulator()); !running {
+		t.Error("moving to the merged view stopped the capture")
+	}
+	if entries == 0 {
+		t.Error("the exchange already captured did not carry over to the merged stream")
+	}
+}
+
+// t on the merged stream takes the traffic back out and leaves the log running.
+func TestTogglingTrafficOffLeavesTheLog(t *testing.T) {
+	a, v, s, stop := startFlowsView(t)
+	defer stop()
+	send(s, "GET", "https://x/y", 200, proxy.OriginDevice, "")
+	waitFor(t, a, 5*time.Second, func() bool { return len(v.visible()) == 1 })
+
+	a.tv.QueueUpdate(func() { v.mixWithLog() })
+	var lv *logsView
+	waitFor(t, a, 5*time.Second, func() bool {
+		lv, _ = a.top().(*logsView)
+		return lv != nil && lv.mixing()
+	})
+
+	a.tv.QueueUpdate(func() { lv.toggleTraffic() })
+	waitFor(t, a, 5*time.Second, func() bool { return !lv.mixing() })
+	if lv.Name() != "logs" {
+		t.Errorf("view name after hiding traffic = %q", lv.Name())
+	}
+	// the capture itself is untouched: hiding is not stopping
+	if _, running := a.m.Capture(emulator()); !running {
+		t.Error("hiding the traffic stopped the capture")
+	}
+}
