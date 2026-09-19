@@ -74,7 +74,7 @@ func (v *devicesView) Hints() []hint {
 	// that mean something for it
 	if d, ok := v.selected(); ok && d.IsHost() {
 		return []hint{
-			{"enter", "watch this machine's traffic"}, {"t", "watch this machine's traffic"}, {"l", "system log"},
+			{"enter", "apps running here"}, {"t", "watch this machine's traffic"}, {"l", "system log"},
 			groupBreak,
 			{"/", "filter"}, {"s", "show unused sims"},
 			groupBreak,
@@ -327,11 +327,6 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 func (v *devicesView) openApps() {
 	d, ok := v.selected()
 	if !ok {
-		return
-	}
-	// this machine has no app list to open, so enter goes where a desktop can actually go
-	if d.IsHost() {
-		v.watchTraffic()
 		return
 	}
 	if d.Reachable() {

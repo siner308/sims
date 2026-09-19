@@ -29,23 +29,22 @@ func devicesViewWithHost(t *testing.T) (*App, *devicesView, func()) {
 	return a, dv, func() { a.m.StopAllCaptures(); stop() }
 }
 
-// Enter on this machine used to try to list its apps, which it has none of, and the user got an
-// unsupported-operation error with nowhere to go. It now opens the one thing a desktop offers.
-func TestEnterOnTheHostDoesNotDeadEnd(t *testing.T) {
+// Enter on this machine used to fail with "cannot list the apps of the machine it runs on" and
+// leave the user nowhere. A Mac does have apps, so it opens them like any other device.
+func TestEnterOnTheHostOpensAnAppList(t *testing.T) {
 	a, dv, stop := devicesViewWithHost(t)
 	defer stop()
 
 	a.tv.QueueUpdate(func() { dv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)) })
-	// starting a capture asks first, which is progress rather than an error
-	waitFor(t, a, 5*time.Second, func() bool { return a.body.HasPage("confirm") })
+	waitFor(t, a, 10*time.Second, func() bool {
+		_, ok := a.top().(*appsView)
+		return ok
+	})
 
 	var status string
 	a.tv.QueueUpdate(func() { status = a.status.GetText(true) })
 	if strings.Contains(status, "unsupported") || strings.Contains(status, "cannot list the apps") {
 		t.Errorf("enter on this machine still errors: %q", status)
-	}
-	if _, isApps := a.top().(*appsView); isApps {
-		t.Error("enter opened an app list for a machine that has none")
 	}
 }
 

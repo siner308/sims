@@ -142,7 +142,7 @@ func (v *flowsView) render() {
 		selectedID = f.ID
 	}
 	v.table.Clear()
-	setHeader(v.table, "", "METHOD", "STATUS", "HOST", "PATH", "SIZE", "TIME", "FROM")
+	setHeader(v.table, "", "WHEN", "METHOD", "STATUS", "HOST", "PATH", "SIZE", "TOOK", "FROM")
 	row, want := 1, 1
 	flows := v.visible()
 	for _, f := range flows {
@@ -150,13 +150,14 @@ func (v *flowsView) render() {
 			want = row
 		}
 		v.table.SetCell(row, 0, tview.NewTableCell(kindMark(f)).SetReference(f).SetMaxWidth(2))
-		v.table.SetCell(row, 1, tview.NewTableCell(highlight(f.Method, v.filter)).SetMaxWidth(7))
-		v.table.SetCell(row, 2, tview.NewTableCell(statusCell(f)).SetMaxWidth(7))
-		v.table.SetCell(row, 3, tview.NewTableCell(highlight(hostOf(f), v.filter)))
-		v.table.SetCell(row, 4, tview.NewTableCell(highlight(pathOf(f), v.filter)).SetExpansion(2))
-		v.table.SetCell(row, 5, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
-		v.table.SetCell(row, 6, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(8))
-		v.table.SetCell(row, 7, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
+		v.table.SetCell(row, 1, tview.NewTableCell(clockCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(13))
+		v.table.SetCell(row, 2, tview.NewTableCell(highlight(f.Method, v.filter)).SetMaxWidth(7))
+		v.table.SetCell(row, 3, tview.NewTableCell(statusCell(f)).SetMaxWidth(7))
+		v.table.SetCell(row, 4, tview.NewTableCell(highlight(hostOf(f), v.filter)))
+		v.table.SetCell(row, 5, tview.NewTableCell(highlight(pathOf(f), v.filter)).SetExpansion(2))
+		v.table.SetCell(row, 6, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
+		v.table.SetCell(row, 7, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(8))
+		v.table.SetCell(row, 8, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
 		row++
 	}
 	if row == 1 {
@@ -179,7 +180,7 @@ func (v *flowsView) renderGrouped() {
 	}
 
 	v.table.Clear()
-	setHeader(v.table, "", "DOMAIN / PATH", "STATUS", "SIZE", "TIME", "FROM")
+	setHeader(v.table, "", "WHEN", "DOMAIN / PATH", "STATUS", "SIZE", "TOOK", "FROM")
 	row, want := 1, 1
 	for _, g := range groupByDomain(v.visible()) {
 		mark := "\u25be" // ▾ open
@@ -190,11 +191,12 @@ func (v *flowsView) renderGrouped() {
 			want = row
 		}
 		v.table.SetCell(row, 0, tview.NewTableCell("[aqua]"+mark+"[-]").SetReference(g).SetMaxWidth(2))
-		v.table.SetCell(row, 1, tview.NewTableCell("[::b]"+highlight(g.Host, v.filter)+"[::-]").SetExpansion(2))
-		v.table.SetCell(row, 2, tview.NewTableCell(g.summary()).SetExpansion(1))
-		v.table.SetCell(row, 3, tview.NewTableCell(""))
-		v.table.SetCell(row, 4, tview.NewTableCell(relativeTime(g.Last, time.Now())).SetTextColor(tcell.ColorGray).SetMaxWidth(10))
-		v.table.SetCell(row, 5, tview.NewTableCell(groupSenders(g)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
+		v.table.SetCell(row, 1, tview.NewTableCell(relativeTime(g.Last, time.Now())).SetTextColor(tcell.ColorGray).SetMaxWidth(13))
+		v.table.SetCell(row, 2, tview.NewTableCell("[::b]"+highlight(g.Host, v.filter)+"[::-]").SetExpansion(2))
+		v.table.SetCell(row, 3, tview.NewTableCell(g.summary()).SetExpansion(1))
+		v.table.SetCell(row, 4, tview.NewTableCell(""))
+		v.table.SetCell(row, 5, tview.NewTableCell(""))
+		v.table.SetCell(row, 6, tview.NewTableCell(groupSenders(g)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
 		row++
 		if v.collapsed[g.Host] {
 			continue
@@ -204,11 +206,12 @@ func (v *flowsView) renderGrouped() {
 				want = row
 			}
 			v.table.SetCell(row, 0, tview.NewTableCell(kindMark(f)).SetReference(f).SetMaxWidth(2))
-			v.table.SetCell(row, 1, tview.NewTableCell("  "+highlight(f.Method+" "+pathOf(f), v.filter)).SetExpansion(2))
-			v.table.SetCell(row, 2, tview.NewTableCell(statusCell(f)).SetExpansion(1))
-			v.table.SetCell(row, 3, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
-			v.table.SetCell(row, 4, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(10))
-			v.table.SetCell(row, 5, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
+			v.table.SetCell(row, 1, tview.NewTableCell(clockCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(13))
+			v.table.SetCell(row, 2, tview.NewTableCell("  "+highlight(f.Method+" "+pathOf(f), v.filter)).SetExpansion(2))
+			v.table.SetCell(row, 3, tview.NewTableCell(statusCell(f)).SetExpansion(1))
+			v.table.SetCell(row, 4, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
+			v.table.SetCell(row, 5, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(8))
+			v.table.SetCell(row, 6, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
 			row++
 		}
 	}
@@ -349,6 +352,15 @@ func sizeCell(f proxy.Flow) string {
 		return "-"
 	}
 	return proxy.SizeString(f.RespSize)
+}
+
+// clockCell is when the request went out. The table used to show only how long it took, which says
+// nothing about what a request happened next to.
+func clockCell(f proxy.Flow) string {
+	if f.Start.IsZero() {
+		return "-"
+	}
+	return f.Start.Format("15:04:05.000")
 }
 
 func timeCell(f proxy.Flow) string {
@@ -606,8 +618,9 @@ func writeOverview(b *strings.Builder, f proxy.Flow) {
 	row("kind", string(f.Kind))
 	row("from", f.Process)
 	row("client", f.Client)
-	row("started", f.Start.Format("15:04:05.000"))
+	row("started", f.Start.Format("2006-01-02 15:04:05.000"))
 	if f.Done {
+		row("finished", f.Start.Add(f.Duration).Format("2006-01-02 15:04:05.000"))
 		row("took", f.Duration.String())
 	} else {
 		row("took", "still running")

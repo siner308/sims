@@ -53,6 +53,8 @@ func TestUnsupportedActionsExplainThemselves(t *testing.T) {
 	p := provider(t)
 	d := device.Device{ID: desktop.ID, Kind: device.KindHost, Platform: device.PlatformDesktop}
 
+	// launching an app and listing them are things a desktop can do; what it cannot is everything
+	// that treats it as a device sims drives
 	checks := map[string]error{
 		"boot":      p.Boot(t.Context(), d),
 		"shutdown":  p.Shutdown(t.Context(), d),
@@ -60,7 +62,6 @@ func TestUnsupportedActionsExplainThemselves(t *testing.T) {
 		"delete":    p.Delete(t.Context(), d),
 		"install":   p.InstallApp(t.Context(), d, "x"),
 		"uninstall": p.UninstallApp(t.Context(), d, "x"),
-		"launch":    p.LaunchApp(t.Context(), d, "x"),
 	}
 	for name, err := range checks {
 		if err == nil {
@@ -73,9 +74,6 @@ func TestUnsupportedActionsExplainThemselves(t *testing.T) {
 		if !strings.Contains(err.Error(), "machine sims") {
 			t.Errorf("%s: %q does not say why", name, err)
 		}
-	}
-	if _, err := p.Apps(t.Context(), d); err == nil {
-		t.Error("apps were listed for this machine")
 	}
 }
 

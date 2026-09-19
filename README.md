@@ -131,9 +131,9 @@ of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb
 system trust store on an emulator that allows it, a configuration profile on an iPhone. The
 certificate is made once and kept, so the second capture on a device needs no setup at all.
 
-The machine sims runs on is in the list too, as a `desktop` device. `enter` and `t` both open its
-traffic, since an app list is the one thing it does not have. It boots nothing and installs nothing,
-and says so in a line when asked, but its traffic and its system log are the same two things sims
+The machine sims runs on is in the list too, as a `desktop` device. `enter` opens what is running
+here and what is installed, with the process name that ties each app to a row in a capture, and
+`enter` there launches one. It boots nothing and installs nothing, and says so in a line when asked, but its traffic and its system log are the same two things sims
 shows for everything else: `t` captures what the apps on this Mac are sending, with each row named
 by the process behind it. Trusting the certificate there is a command rather than part of starting a
 capture, because macOS puts up an authorisation panel: `sims proxy ca localhost --install`. Windows

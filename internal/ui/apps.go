@@ -31,6 +31,14 @@ func newAppsView(a *App, d device.Device) *appsView {
 func (v *appsView) Name() string               { return "apps" }
 func (v *appsView) Primitive() tview.Primitive { return v.table }
 func (v *appsView) Hints() []hint {
+	// sims does not install onto the machine it runs on, so this list is what is here already
+	if v.dev.IsHost() {
+		return []hint{
+			{"enter", "launch"}, {"t", "this machine's traffic"}, {"l", "logs of this app"},
+			groupBreak,
+			{"s", "toggle what ships with macos"}, {"/", "filter"},
+		}
+	}
 	return []hint{
 		{"enter", "launch"}, {"i", "install (os dialog)"}, {"shift+i", "install (tui picker)"}, {"ctrl+u", "uninstall"},
 		groupBreak,
@@ -86,7 +94,11 @@ func (v *appsView) render() {
 	v.table.Select(1, 0)
 	title := fmt.Sprintf(" apps @ %s [%d] ", v.dev.Name, r-1)
 	if v.showSystem {
-		title = fmt.Sprintf(" apps @ %s [%d, +preinstalled] ", v.dev.Name, r-1)
+		label := "preinstalled"
+		if v.dev.IsHost() {
+			label = "macos"
+		}
+		title = fmt.Sprintf(" apps @ %s [%d, +%s] ", v.dev.Name, r-1, label)
 	}
 	if v.filter != "" {
 		title += fmt.Sprintf("/%s ", v.filter)
@@ -112,11 +124,17 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 				v.app.flash("launched " + a.BundleID)
 			})
 		}
-	case ev.Rune() == 'i':
-		v.pickAndInstall(true)
-	case ev.Rune() == 'I':
-		v.pickAndInstall(false)
+	case ev.Rune() == 'i', ev.Rune() == 'I':
+		if v.dev.IsHost() {
+			v.app.flashErr(fmt.Errorf("sims does not install apps onto the machine it runs on"))
+			return nil
+		}
+		v.pickAndInstall(ev.Rune() == 'i')
 	case ev.Key() == tcell.KeyCtrlU:
+		if v.dev.IsHost() {
+			v.app.flashErr(fmt.Errorf("sims does not uninstall apps from the machine it runs on"))
+			return nil
+		}
 		if a, ok := v.selected(); ok {
 			v.app.confirm(fmt.Sprintf("uninstall %s?", a.BundleID), func() {
 				v.app.async(func() error { return v.app.m.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {

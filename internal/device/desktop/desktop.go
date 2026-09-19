@@ -47,6 +47,9 @@ func (p *Provider) List(ctx context.Context) ([]device.Device, error) {
 	}}, nil
 }
 
+// homeDirOf is os.UserHomeDir, named so the platform files can share it.
+func homeDirOf() (string, error) { return os.UserHomeDir() }
+
 func hostName() string {
 	if name := localName(); name != "" {
 		return name
@@ -69,10 +72,6 @@ func (p *Provider) Shutdown(context.Context, device.Device) error { return notSu
 func (p *Provider) Erase(context.Context, device.Device) error    { return notSupported("erase") }
 func (p *Provider) Delete(context.Context, device.Device) error   { return notSupported("delete") }
 
-func (p *Provider) Apps(context.Context, device.Device) ([]device.App, error) {
-	return nil, notSupported("list the apps of")
-}
-
 func (p *Provider) InstallApp(context.Context, device.Device, string) error {
 	return notSupported("install an app on")
 }
@@ -81,8 +80,9 @@ func (p *Provider) UninstallApp(context.Context, device.Device, string) error {
 	return notSupported("uninstall an app from")
 }
 
-func (p *Provider) LaunchApp(context.Context, device.Device, string) error {
-	return notSupported("launch an app on")
+// LaunchApp opens an app on this machine, which is the one app action a desktop can honestly do.
+func (p *Provider) LaunchApp(ctx context.Context, _ device.Device, bundleID string) error {
+	return launchApp(ctx, bundleID)
 }
 
 func (p *Provider) Images(context.Context) ([]device.Image, error) { return nil, nil }
