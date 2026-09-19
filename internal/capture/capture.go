@@ -256,7 +256,9 @@ func (s *Session) attribute(ctx context.Context, clientAddr string) proxy.Attrib
 		return s.decide(proxy.Attribution{Label: p.Name, Origin: proxy.OriginDevice})
 	}
 	if needsHostProxy(s.Device) && isSimulatorProcess(p) {
-		return s.decide(proxy.Attribution{Label: s.Device.Name, Origin: proxy.OriginDevice})
+		// a simulator's apps run as host processes, so lsof names the one that opened the
+		// connection; keeping that name is what lets a row say more than "the simulator"
+		return s.decide(proxy.Attribution{Label: simulatorProcessName(p), Origin: proxy.OriginDevice})
 	}
 	return s.decide(proxy.Attribution{Label: p.Name, Origin: proxy.OriginHost})
 }
@@ -270,6 +272,16 @@ func (s *Session) decide(a proxy.Attribution) proxy.Attribution {
 	}
 	a.Ignore = a.Origin != proxy.OriginDevice
 	return a
+}
+
+// simulatorProcessName is the executable that opened the connection, without the runtime path it
+// lives under. Apple's own networking processes (WebKit.Networking, nsurlsessiond) carry traffic on
+// behalf of other apps, so the name is where a request came out, not always which app wanted it.
+func simulatorProcessName(p proxy.Process) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	return p.Path
 }
 
 // A simulator's requests come from processes inside CoreSimulator, which run on the host and so are

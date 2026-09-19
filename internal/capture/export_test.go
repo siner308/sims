@@ -44,3 +44,6 @@ func WriteDeadJournalForTest(t *testing.T, dir string, d device.Device) {
 		t.Fatal(err)
 	}
 }
+
+// SimulatorProcessNameForTest exposes the naming used for a simulator's connections.
+func SimulatorProcessNameForTest(p proxy.Process) string { return simulatorProcessName(p) }

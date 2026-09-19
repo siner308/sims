@@ -357,3 +357,15 @@ func TestHostCaptureOpensThisMachinesApps(t *testing.T) {
 		t.Errorf("origin = %q, want the machine to be the device", got.Origin)
 	}
 }
+
+// A simulator's apps run as host processes, so the connection carries a real name. Replacing it
+// with the device's name throws away the only thing that says where a request came from.
+func TestSimulatorFlowKeepsTheProcessName(t *testing.T) {
+	name := capture.SimulatorProcessNameForTest(proxy.Process{
+		Name: "com.apple.WebKit.Networking",
+		Path: "/Library/Developer/CoreSimulator/.../iOS 26.5.simruntime/.../com.apple.WebKit.Networking",
+	})
+	if name != "com.apple.WebKit.Networking" {
+		t.Errorf("process name = %q", name)
+	}
+}
