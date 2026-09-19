@@ -99,6 +99,24 @@ func (m *Manager) StopCapture(d device.Device) error {
 	return s.Stop()
 }
 
+// Leftover reports a capture that was killed before it could put this machine and its device back.
+func (m *Manager) Leftover() capture.Leftover { return capture.FindLeftover("") }
+
+// CleanLeftover undoes it, clearing the device through whichever provider owns it.
+func (m *Manager) CleanLeftover(ctx context.Context, l capture.Leftover) error {
+	return l.Clean(ctx, func(ctx context.Context, d device.Device) error {
+		p, err := m.provider(d)
+		if err != nil {
+			return err
+		}
+		proxier, ok := p.(device.Proxier)
+		if !ok {
+			return fmt.Errorf("%s cannot clear a proxy from here", d.Platform)
+		}
+		return proxier.ClearProxy(ctx, d)
+	})
+}
+
 // StopAllCaptures is what a front end calls on its way out: a device or a Mac left pointing at a
 // proxy that has stopped cannot reach the network, so this must run even on an unclean exit.
 func (m *Manager) StopAllCaptures() error {

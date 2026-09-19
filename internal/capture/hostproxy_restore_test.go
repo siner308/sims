@@ -98,3 +98,54 @@ func TestDeadLoopbackProxyIsNotRestored(t *testing.T) {
 		t.Error("a non-loopback proxy was probed and discarded")
 	}
 }
+
+// The case that actually bit: a proxy left over from a capture with no journal (an older build, or
+// a journal that was removed). Starting a capture must not adopt that dead setting as the one to
+// restore, or stopping puts the broken state back.
+func TestStartDoesNotAdoptADeadProxyAsTheOriginal(t *testing.T) {
+	svc, err := activeService(t.Context())
+	if err != nil {
+		t.Skip(err)
+	}
+	before := map[string]netsetupState{}
+	for _, kind := range []string{"webproxy", "securewebproxy"} {
+		st, err := readHostProxy(t.Context(), svc, kind)
+		if err != nil {
+			t.Skip(err)
+		}
+		if st.enabled {
+			t.Skip("this machine is using a proxy; not touching it")
+		}
+		before[kind] = st
+	}
+	t.Cleanup(func() {
+		for kind := range before {
+			exec.Command("networksetup", "-set"+kind, svc, "", "0").Run()
+			exec.Command("networksetup", "-set"+kind+"state", svc, "off").Run()
+		}
+	})
+
+	// stand in for a killed capture: point the machine at a loopback port with no listener
+	for _, kind := range []string{"webproxy", "securewebproxy"} {
+		if err := exec.Command("networksetup", "-set"+kind, svc, "127.0.0.1", "59998").Run(); err != nil {
+			t.Skip(err)
+		}
+	}
+
+	h := &hostProxy{}
+	if err := h.set(t.Context(), "127.0.0.1", 59997); err != nil {
+		t.Skip(err)
+	}
+	if err := h.restore(); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"webproxy", "securewebproxy"} {
+		st, err := readHostProxy(t.Context(), svc, kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.enabled {
+			t.Errorf("%s was restored to the dead proxy %s:%d instead of being cleared", kind, st.server, st.port)
+		}
+	}
+}

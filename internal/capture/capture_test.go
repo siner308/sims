@@ -235,3 +235,72 @@ func TestServeErrorIsReported(t *testing.T) {
 		t.Errorf("stopping the capture reported %v", err)
 	}
 }
+
+// SIGKILL, a panic and a power cut all skip Stop. What the capture wrote down is what lets the next
+// run put the machine and the device back.
+func TestJournalRecordsAndClearsAcrossAKill(t *testing.T) {
+	dir := t.TempDir()
+	p := newFake()
+	s, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// while it runs, its own journal is not treated as leftover work
+	if l := capture.FindLeftover(dir); l.Found() {
+		t.Errorf("a running capture looks like leftover work: %s", l)
+	}
+
+	// a clean stop leaves nothing behind
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if l := capture.FindLeftover(dir); l.Found() {
+		t.Errorf("a clean stop left something behind: %s", l)
+	}
+}
+
+// A journal from a process that is gone is leftover work, and cleaning it clears the device.
+func TestLeftoverFromADeadProcessIsCleaned(t *testing.T) {
+	dir := t.TempDir()
+	capture.WriteDeadJournalForTest(t, dir, androidEmulator())
+
+	l := capture.FindLeftover(dir)
+	if !l.Found() {
+		t.Fatal("a journal from a dead process was not recognised as leftover work")
+	}
+	if l.Device != "Pixel_7" {
+		t.Errorf("leftover device = %q", l.Device)
+	}
+
+	var cleared device.Device
+	if err := l.Clean(t.Context(), func(_ context.Context, d device.Device) error {
+		cleared = d
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cleared.ID != "Pixel_7" {
+		t.Errorf("cleared %q, want the device from the journal", cleared.ID)
+	}
+	if l := capture.FindLeftover(dir); l.Found() {
+		t.Error("the journal survived the cleanup")
+	}
+}
+
+// A device that has since gone away must not keep the warning on screen for ever.
+func TestCleanDropsTheJournalEvenWhenTheDeviceIsGone(t *testing.T) {
+	dir := t.TempDir()
+	capture.WriteDeadJournalForTest(t, dir, androidEmulator())
+
+	l := capture.FindLeftover(dir)
+	err := l.Clean(t.Context(), func(context.Context, device.Device) error {
+		return errors.New("device not found")
+	})
+	if err == nil {
+		t.Error("the failure to clear the device was swallowed")
+	}
+	if l := capture.FindLeftover(dir); l.Found() {
+		t.Error("the journal survived a failed cleanup, so the warning would never go away")
+	}
+}

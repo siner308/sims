@@ -27,3 +27,20 @@ func (s *Session) ListenAddrForTest() string {
 	}
 	return s.srv.Addr().String()
 }
+
+// WriteDeadJournalForTest leaves the journal a killed capture would have left, with a pid that is
+// certain to be gone.
+func WriteDeadJournalForTest(t *testing.T, dir string, d device.Device) {
+	t.Helper()
+	j := journal{
+		PID:  -1, // never a live process
+		Port: 65123,
+		Device: &journalDevice{
+			ID: d.ID, Name: d.Name, Serial: d.Serial,
+			Platform: string(d.Platform), Kind: string(d.Kind),
+		},
+	}
+	if err := writeJournal(dir, j); err != nil {
+		t.Fatal(err)
+	}
+}

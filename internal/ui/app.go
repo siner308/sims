@@ -103,6 +103,7 @@ func (a *App) build() {
 	a.header.loadFacts(a.ctx, a.m, func(facts [][2]string) {
 		a.tv.QueueUpdateDraw(func() { a.header.facts = facts; a.drawHeader() })
 	})
+	a.offerLeftoverCleanup()
 	go pollUsage(a.ctx, 3*time.Second, func(u usage) {
 		a.tv.QueueUpdateDraw(func() { a.header.usage = u; a.drawHeader() })
 	})
@@ -111,6 +112,22 @@ func (a *App) build() {
 // Run holds until the UI stops. A device or a Mac left pointing at a proxy that has stopped has no
 // working network, so the captures come down with it: on the way out of Run for a normal quit, and
 // on a signal for a terminal that kills the process without letting Run return.
+// offerLeftoverCleanup deals with a capture that was killed before it could put things back. The
+// machine may still be pointing at a proxy that is gone, which is a broken network until someone
+// finds the setting by hand, so this asks on the way in rather than waiting to be asked.
+func (a *App) offerLeftoverCleanup() {
+	l := a.m.Leftover()
+	if !l.Found() {
+		return
+	}
+	a.confirm(l.String()+".\n\nPut it back now?", func() {
+		a.async(func() error { return a.m.CleanLeftover(a.ctx, l) }, func() {
+			a.flash("cleaned up after the capture that did not stop")
+			a.stack[0].Refresh()
+		})
+	})
+}
+
 func (a *App) Run() error {
 	defer a.cancel()
 	defer a.m.StopAllCaptures()

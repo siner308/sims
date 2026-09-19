@@ -156,3 +156,39 @@ func (h *hostProxy) restore() error {
 }
 
 func hostProxySupported() bool { return true }
+
+// restoreRecordedProxy puts back the settings a journal recorded, for a capture that was killed
+// before it could do so itself.
+func restoreRecordedProxy(j journal) error {
+	h := &hostProxy{service: j.Service}
+	for _, b := range j.Before {
+		h.before = append(h.before, netsetupState{kind: b.Kind, enabled: b.Enabled, server: b.Server, port: b.Port})
+	}
+	return h.restore()
+}
+
+// hostProxyStillSet reports whether the machine is still pointing where the dead capture put it.
+// Something else may have fixed it already, and a setting the user has chosen since is not ours.
+func hostProxyStillSet(j journal) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, kind := range []string{"webproxy", "securewebproxy"} {
+		st, err := readHostProxy(ctx, j.Service, kind)
+		if err != nil {
+			continue
+		}
+		if st.enabled && st.server == "127.0.0.1" && st.port == j.Port {
+			return true
+		}
+	}
+	return false
+}
+
+// recordHostProxy is what a capture writes down before it changes anything.
+func (h *hostProxy) recordHostProxy() (string, []journalProxy) {
+	out := make([]journalProxy, 0, len(h.before))
+	for _, st := range h.before {
+		out = append(out, journalProxy{Kind: st.kind, Enabled: st.enabled, Server: st.server, Port: st.port})
+	}
+	return h.service, out
+}

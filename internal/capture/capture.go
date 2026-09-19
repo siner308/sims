@@ -27,10 +27,11 @@ type Session struct {
 	// Steps is what setting the device up took, including anything left for the user to do by hand.
 	Steps []device.ProxyStep
 
-	srv   *proxy.Server
-	host  *hostProxy
-	prov  device.Proxier
-	scope Scope
+	srv     *proxy.Server
+	host    *hostProxy
+	prov    device.Proxier
+	scope   Scope
+	certDir string
 	// configured records that SetProxy was attempted, so Stop clears a setting that a failed start
 	// may have left behind.
 	configured bool
@@ -103,7 +104,7 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 		o.Scope = ScopeDevice
 	}
 	srv := &proxy.Server{CA: ca, Store: proxy.NewStore(o.MaxFlows), MaxBody: o.MaxBody}
-	s := &Session{Device: d, Store: srv.Store, CA: ca, srv: srv, prov: p, host: &hostProxy{}, scope: o.Scope}
+	s := &Session{Device: d, Store: srv.Store, CA: ca, srv: srv, prov: p, host: &hostProxy{}, scope: o.Scope, certDir: dir}
 	srv.Attribute = s.attribute
 
 	port, err := srv.Listen(fmt.Sprintf("%s:%d", listenHost(d), o.Port))
@@ -127,6 +128,8 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 	// from here the device may already carry the setting even if SetProxy reports an error, so Stop
 	// has to clear it; s.prov is what tells Stop to try.
 	s.configured = true
+	// written before anything changes: a capture killed past this point is undone by the next run
+	s.writeJournal()
 	steps, err := p.SetProxy(ctx, d, target)
 	if err != nil {
 		s.Stop()
@@ -151,6 +154,8 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 			s.Stop()
 			return nil, err
 		}
+		// now that the machine's own settings are changed, record what they were
+		s.writeJournal()
 		s.Steps = append(s.Steps, device.ProxyStep{
 			Title:  "this Mac",
 			Detail: "its web proxy now points at 127.0.0.1:" + fmt.Sprint(port) + " and goes back when the capture stops",
@@ -172,6 +177,20 @@ func listenHost(d device.Device) string {
 		return "0.0.0.0"
 	}
 	return "127.0.0.1"
+}
+
+// writeJournal records what this capture has changed, so a run that is killed before it can put
+// things back leaves enough for the next one to finish the job.
+func (s *Session) writeJournal() {
+	j := journal{PID: os.Getpid(), Port: s.Port}
+	j.Service, j.Before = s.host.recordHostProxy()
+	if s.configured {
+		j.Device = &journalDevice{
+			ID: s.Device.ID, Name: s.Device.Name, Serial: s.Device.Serial,
+			Platform: string(s.Device.Platform), Kind: string(s.Device.Kind),
+		}
+	}
+	_ = writeJournal(s.certDir, j)
 }
 
 // needsHostProxy reports whether the device borrows this machine's network settings, which only an
@@ -281,6 +300,8 @@ func (s *Session) Stop() error {
 				errs = append(errs, err)
 			}
 		}
+		// everything is back, so there is nothing left for a later run to undo
+		removeJournal(s.certDir)
 	})
 	return errors.Join(errs...)
 }

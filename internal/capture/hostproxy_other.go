@@ -16,3 +16,9 @@ func (h *hostProxy) set(context.Context, string, int) error {
 func (h *hostProxy) restore() error { return nil }
 
 func hostProxySupported() bool { return false }
+
+func restoreRecordedProxy(journal) error { return nil }
+
+func hostProxyStillSet(journal) bool { return false }
+
+func (h *hostProxy) recordHostProxy() (string, []journalProxy) { return "", nil }

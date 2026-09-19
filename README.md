@@ -131,6 +131,11 @@ of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb
 system trust store on an emulator that allows it, a configuration profile on an iPhone. The
 certificate is made once and kept, so the second capture on a device needs no setup at all.
 
+A capture puts every setting back when it stops, including on ctrl+c or a SIGTERM. When it cannot,
+because it was killed outright or the machine lost power, it leaves a note of what it changed: the
+next capture, the next `sims` start and `sims proxy clean` each read that note and undo the rest, so
+a machine is never left pointing at a proxy that is gone.
+
 What sims could not read is still listed rather than hidden. An app that pins its certificate refuses
 every proxy, sims included; those rows show as `tunnel` and say why, which is the difference between
 a limit and a bug.
@@ -213,6 +218,7 @@ sims app logs <device> <bundle>             # android: the app must be running (
 
 sims proxy run <device> [--port N] [--har out.har] [--for 30s] [--all] [--quiet] [--json]
 sims proxy ca [device] [--install]          # print the root certificate, or trust it on a device
+sims proxy clean                            # put back what a killed capture left behind
 
 sims image list [--all]                     # --all includes what sdkmanager can still download
 sims image install <image>                  # android; iOS runtimes come from xcodebuild -downloadPlatform iOS

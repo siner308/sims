@@ -18,7 +18,7 @@ import (
 
 func (c *cli) proxyCmd() *cobra.Command {
 	cmd := group("proxy", "Watch a device's HTTP traffic", "traffic")
-	cmd.AddCommand(c.proxyRunCmd(), c.proxyCACmd())
+	cmd.AddCommand(c.proxyRunCmd(), c.proxyCACmd(), c.proxyCleanCmd())
 	return cmd
 }
 
@@ -160,6 +160,26 @@ func (c *cli) printFlow(f proxy.Flow) {
 	}
 	fmt.Fprintf(c.Out, "%-6s %-6s %-9s %s%s%s\n",
 		f.Method, status, proxy.SizeString(f.RespSize), f.URL, origin, note)
+}
+
+// proxyCleanCmd is the way out when a capture was killed and nothing has started one since: the
+// machine is pointing at a proxy that is gone and the user needs one command, not a settings pane.
+func (c *cli) proxyCleanCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "clean",
+		Short: "Put back what a capture that did not stop cleanly left behind",
+		Args:  cobra.NoArgs,
+		RunE: c.run(func(ctx context.Context, _ []string) error {
+			l := c.Manager.Leftover()
+			if !l.Found() {
+				return c.result(map[string]bool{"cleaned": false}, "nothing to clean up")
+			}
+			if err := c.Manager.CleanLeftover(ctx, l); err != nil {
+				return err
+			}
+			return c.result(map[string]bool{"cleaned": true}, "put back "+l.String())
+		}),
+	}
 }
 
 func (c *cli) proxyCACmd() *cobra.Command {
