@@ -506,11 +506,29 @@ func (a *App) async(work func() error, then func()) {
 	}()
 }
 
+// confirm asks before an action the user has already chosen, so Yes is where the cursor starts and
+// enter carries on. Use confirmDangerous where a mistaken enter would destroy something.
 func (a *App) confirm(question string, onYes func()) {
+	a.ask(question, false, onYes)
+}
+
+// confirmDangerous is the same prompt for something that cannot be undone: erasing a device,
+// deleting one, uninstalling an app. The cursor starts on No, so enter alone never destroys
+// anything and the user has to say yes deliberately.
+func (a *App) confirmDangerous(question string, onYes func()) {
+	a.ask(question, true, onYes)
+}
+
+func (a *App) ask(question string, dangerous bool, onYes func()) {
 	modal := tview.NewModal().SetText(question + "\n\n[gray]y / n, or move with left and right[-]").AddButtons([]string{"No", "Yes"})
 	modal.SetBackgroundColor(tcell.ColorDefault)
 	modal.SetButtonStyle(buttonStyle).SetButtonActivatedStyle(focusStyle)
-	modal.SetFocus(0)
+	// buttons are No, Yes: index 1 is Yes
+	focus := 1
+	if dangerous {
+		focus = 0
+	}
+	modal.SetFocus(focus)
 	// y and n answer directly, the way lazygit and git prompts do
 	modal.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		switch ev.Rune() {

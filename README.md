@@ -318,7 +318,7 @@ sims skill > SKILL.md                   # for any other agent
 
 Filtering works the same everywhere: `/` opens an empty prompt, `enter` applies the text as a case-insensitive substring match and highlights every hit in the rows (or log lines) that pass, an empty `enter` clears the filter, and `esc` leaves the current filter alone.
 
-Anything that stops or removes something (shutdown, wipe, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; wipe, delete and uninstall also ask for confirmation, and the prompt spells out what is lost.
+Anything that stops or removes something (shutdown, wipe, delete, uninstall) takes a ctrl chord so a stray key cannot fire it; wipe, delete and uninstall also ask for confirmation, and the prompt spells out what is lost. A confirmation starts on Yes, since it follows a key you already pressed, except for those three: there the cursor starts on No so enter alone never destroys anything.
 
 ## Android emulators: keyboard and nav keys
 

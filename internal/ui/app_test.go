@@ -609,9 +609,8 @@ func TestDevicesView_EnterOnStoppedDeviceBootsThenOpensApps(t *testing.T) {
 			t.Errorf("front page = %q, want confirm modal", name)
 			return
 		}
-		// No comes first so a stray enter is harmless; move to Yes before confirming
+		// booting is not destructive, so the cursor starts on Yes and enter carries on
 		handler := prim.(*tview.Modal).InputHandler()
-		handler(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(tview.Primitive) {})
 		handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
 	})
 	waitFor(t, a, 10*time.Second, func() bool { _, ok := a.top().(*appsView); return ok })

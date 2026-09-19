@@ -136,7 +136,7 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 		if a, ok := v.selected(); ok {
-			v.app.confirm(fmt.Sprintf("uninstall %s?", a.BundleID), func() {
+			v.app.confirmDangerous(fmt.Sprintf("uninstall %s?", a.BundleID), func() {
 				v.app.async(func() error { return v.app.m.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {
 					v.app.flash("uninstalled " + a.BundleID)
 					v.Refresh()

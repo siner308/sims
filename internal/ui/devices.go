@@ -503,7 +503,7 @@ func (v *devicesView) act(verb string, dangerous bool, fn func(context.Context, 
 		})
 	}
 	if dangerous {
-		v.app.confirm(fmt.Sprintf("%s %s (%s)?\n\n%s", verb, d.Name, d.Platform, dangerNote(verb, d)), run)
+		v.app.confirmDangerous(fmt.Sprintf("%s %s (%s)?\n\n%s", verb, d.Name, d.Platform, dangerNote(verb, d)), run)
 		return
 	}
 	run()

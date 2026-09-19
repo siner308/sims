@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -141,8 +142,33 @@ func (p *Provider) Boot(ctx context.Context, d device.Device) error {
 	if _, err := simctl(ctx, "boot", d.ID); err != nil {
 		return err
 	}
-	// simctl boot runs headless; Simulator.app is what puts a window on screen.
-	return exec.CommandContext(ctx, "open", "-a", "Simulator").Run()
+	// simctl boot runs headless, and the app that puts a window on screen is a convenience on top:
+	// Simulator.app through Xcode 26, DeviceHub.app in 27. A machine with neither still has a
+	// booted device, so failing to open a window is not failing to boot.
+	openSimulatorWindow(ctx)
+	return nil
+}
+
+// simulatorWindowApps are the apps that show a booted simulator, newest Xcode first.
+var simulatorWindowApps = []string{"Simulator", "DeviceHub"}
+
+// openSimulatorWindow brings up whichever of them this Xcode ships, and gives up quietly: the
+// device is booted either way and `simctl` drives it without a window.
+func openSimulatorWindow(ctx context.Context) {
+	for _, name := range simulatorWindowApps {
+		if err := exec.CommandContext(ctx, "open", "-a", name).Run(); err == nil {
+			return
+		}
+	}
+	if dev, err := exec.CommandContext(ctx, "xcode-select", "-p").Output(); err == nil {
+		root := filepath.Dir(filepath.Dir(strings.TrimSpace(string(dev))))
+		for _, name := range simulatorWindowApps {
+			path := filepath.Join(root, "Contents", "Applications", name+".app")
+			if err := exec.CommandContext(ctx, "open", "-a", path).Run(); err == nil {
+				return
+			}
+		}
+	}
 }
 
 func (p *Provider) Shutdown(ctx context.Context, d device.Device) error {
