@@ -142,14 +142,16 @@ func (p *Provider) Boot(ctx context.Context, d device.Device) error {
 	if _, err := simctl(ctx, "boot", d.ID); err != nil {
 		return err
 	}
-	// simctl boot runs headless, and the app that puts a window on screen is a convenience on top:
-	// Simulator.app through Xcode 26, DeviceHub.app in 27. A machine with neither still has a
-	// booted device, so failing to open a window is not failing to boot.
+	// simctl boot runs headless, and the app that puts a window on screen is a convenience on top.
+	// Which app that is has moved: an Xcode 27 install here has no Simulator.app and does have a
+	// DeviceHub.app. A machine with neither still has a booted device, so failing to open a window
+	// is not failing to boot.
 	openSimulatorWindow(ctx)
 	return nil
 }
 
-// simulatorWindowApps are the apps that show a booted simulator, newest Xcode first.
+// simulatorWindowApps are the apps that have shown a booted simulator, tried in turn because the
+// name differs by Xcode version.
 var simulatorWindowApps = []string{"Simulator", "DeviceHub"}
 
 // openSimulatorWindow brings up whichever of them this Xcode ships, and gives up quietly: the
