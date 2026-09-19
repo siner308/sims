@@ -70,6 +70,17 @@ func newDevicesView(a *App) *devicesView {
 func (v *devicesView) Name() string               { return "devices" }
 func (v *devicesView) Primitive() tview.Primitive { return v.table }
 func (v *devicesView) Hints() []hint {
+	// the machine sims runs on boots nothing and installs nothing, so it is offered only the keys
+	// that mean something for it
+	if d, ok := v.selected(); ok && d.IsHost() {
+		return []hint{
+			{"enter", "watch this machine's traffic"}, {"t", "watch this machine's traffic"}, {"l", "system log"},
+			groupBreak,
+			{"/", "filter"}, {"s", "show unused sims"},
+			groupBreak,
+			{"shift+n", "sort name"}, {"shift+s", "sort state"}, {"shift+l", "sort last"},
+		}
+	}
 	return []hint{
 		{"enter", "apps (boots first)"}, {"l", "logs"}, {"b", "boot"},
 		{"ctrl+k", "shutdown"}, {"ctrl+e", "wipe data (keep device)"}, {"ctrl+d", "delete device"},
@@ -318,6 +329,11 @@ func (v *devicesView) openApps() {
 	if !ok {
 		return
 	}
+	// this machine has no app list to open, so enter goes where a desktop can actually go
+	if d.IsHost() {
+		v.watchTraffic()
+		return
+	}
 	if d.Reachable() {
 		v.app.push(newAppsView(v.app, d))
 		return
@@ -454,6 +470,10 @@ func withCapture(a *App, d device.Device, then func(*capture.Session)) {
 // this Mac's own network settings, which is the part a user would not expect.
 func captureNote(d device.Device) string {
 	switch {
+	case d.IsHost():
+		return "sims points this machine's web proxy at itself while the capture runs,\n" +
+			"so every app here goes through it and each row is named by the process behind it.\n" +
+			"Opening HTTPS also needs the certificate trusted: sims proxy ca localhost --install."
 	case needsHostProxy(d):
 		return "sims trusts its certificate on the simulator, and points this Mac's web proxy at itself\n" +
 			"while the capture runs. Other apps on the Mac keep working: their traffic is relayed\n" +
@@ -472,6 +492,12 @@ func captureNote(d device.Device) string {
 func (v *devicesView) act(verb string, dangerous bool, fn func(context.Context, device.Device) error) {
 	d, ok := v.selected()
 	if !ok {
+		return
+	}
+	// the machine sims runs on cannot be booted, wiped or deleted; saying so beats a stack of
+	// unsupported-operation errors from the layer underneath
+	if d.IsHost() {
+		v.app.flashErr(fmt.Errorf("%s is the machine sims is running on; it cannot %s from here", d.Name, verb))
 		return
 	}
 	run := func() {
