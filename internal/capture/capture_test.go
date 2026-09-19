@@ -369,3 +369,21 @@ func TestSimulatorFlowKeepsTheProcessName(t *testing.T) {
 		t.Errorf("process name = %q", name)
 	}
 }
+
+// A host capture is the one case that changes this machine's own settings, so it is checked at the
+// layer that decides, not by running one: a test that really pointed the Mac at a proxy would fight
+// every other test and leave the developer's machine altered.
+func TestHostDeviceNeedsTheMachinesProxy(t *testing.T) {
+	host := device.Device{
+		ID: "localhost", Name: "This Mac",
+		Platform: device.PlatformDesktop, Kind: device.KindHost,
+		Transport: device.TransportLocal, State: device.StateConnected,
+	}
+	if !capture.NeedsHostProxyForTest(host) {
+		t.Error("a capture of this machine would not change its proxy settings, so nothing would be captured")
+	}
+	emu := androidEmulator()
+	if capture.NeedsHostProxyForTest(emu) {
+		t.Error("an emulator has its own proxy setting and must not touch the machine's")
+	}
+}

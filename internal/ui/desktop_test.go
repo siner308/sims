@@ -10,10 +10,14 @@ import (
 
 // The merged view was written for phones. The machine itself has to work the same way, or the claim
 // that t and l compose on a desktop is untrue.
+//
+// The device is marked virtual rather than host on purpose: a real host capture changes this
+// machine's own proxy settings, and a test that does that fights every other test and leaves the
+// developer's machine altered. What is under test here is the view, not the plumbing.
 func TestMergedViewWorksForTheHostDevice(t *testing.T) {
 	host := device.Device{
 		ID: "localhost", Name: "This Mac",
-		Platform: device.PlatformDesktop, Kind: device.KindHost,
+		Platform: device.PlatformDesktop, Kind: device.KindVirtual,
 		Transport: device.TransportLocal, State: device.StateConnected,
 	}
 	prov := &proxyProvider{fakeProvider: &fakeProvider{platform: device.PlatformDesktop, devices: []device.Device{host}}}

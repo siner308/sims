@@ -47,3 +47,6 @@ func WriteDeadJournalForTest(t *testing.T, dir string, d device.Device) {
 
 // SimulatorProcessNameForTest exposes the naming used for a simulator's connections.
 func SimulatorProcessNameForTest(p proxy.Process) string { return simulatorProcessName(p) }
+
+// NeedsHostProxyForTest exposes which devices borrow this machine's network settings.
+func NeedsHostProxyForTest(d device.Device) bool { return needsHostProxy(d) }
