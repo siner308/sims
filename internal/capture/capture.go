@@ -187,6 +187,7 @@ func (s *Session) target(ctx context.Context, d device.Device, ca *proxy.CA, o O
 		CACertDER: ca.CertDER(),
 		CertName:  "sims proxy CA",
 		SSID:      o.SSID,
+		Signer:    ca,
 	}
 	switch {
 	case needsHostProxy(d):

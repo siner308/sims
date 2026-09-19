@@ -1,6 +1,7 @@
 package ios
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -56,7 +57,10 @@ func (p *Provider) installProfile(ctx context.Context, d device.Device, t device
 	if len(t.CACert) == 0 {
 		return nil, errors.New("a phone needs the certificate to install a proxy profile")
 	}
-	path, cleanup, err := writeProfile(t)
+	if t.Signer == nil {
+		return nil, errors.New("a phone's profile has to be signed, and no signer was given")
+	}
+	path, cleanup, err := writeSignedProfile(t, t.Signer)
 	if err != nil {
 		return nil, err
 	}
@@ -163,9 +167,23 @@ type profileData struct {
 	SSID        string
 }
 
+// signer turns a profile into the CMS envelope iOS expects. The capture passes the CA; a nil signer
+// writes the profile unsigned, which only the tests do.
+type signer interface {
+	SignCMS(data []byte) ([]byte, error)
+}
+
 func writeProfile(t device.ProxyTarget) (string, func(), error) {
+	return writeSignedProfile(t, nil)
+}
+
+// writeSignedProfile builds the .mobileconfig and, when a signer is given, wraps it in CMS.
+// devicectl refuses an unsigned profile: it reads one as a provisioning profile and reports
+// "The provisioning profile CMS/PKCS#7 envelope is invalid".
+func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), error) {
 	if t.SSID == "" {
-		return "", nil, errors.New("a phone takes its proxy from the wifi network it is on; sims needs that network's name")
+		return "", nil, errors.New("a phone takes its proxy from the wifi network it is on, and this Mac is not on one; " +
+			"join the phone's wifi network, or use sims proxy ca <phone> --install and set the proxy on the phone by hand")
 	}
 	uuid := func() (string, error) {
 		var b [16]byte
@@ -201,18 +219,19 @@ func writeProfile(t device.ProxyTarget) (string, func(), error) {
 	if err != nil {
 		return "", nil, err
 	}
+	var body bytes.Buffer
+	if err := tmpl.Execute(&body, data); err != nil {
+		return "", nil, err
+	}
+	out := body.Bytes()
+	if sign != nil {
+		out, err = sign.SignCMS(out)
+		if err != nil {
+			return "", nil, fmt.Errorf("could not sign the profile: %w", err)
+		}
+	}
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("sims-proxy-%s.mobileconfig", shortHash(t.CACertDER)))
-	f, err := os.Create(path)
-	if err != nil {
-		return "", nil, err
-	}
-	if err := tmpl.Execute(f, data); err != nil {
-		f.Close()
-		os.Remove(path)
-		return "", nil, err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(path)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
 		return "", nil, err
 	}
 	return path, func() { os.Remove(path) }, nil

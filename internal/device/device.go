@@ -301,6 +301,13 @@ type ProxyTarget struct {
 	CertName string
 	// SSID is the wifi network a phone's proxy setting is attached to; iOS has no global proxy.
 	SSID string
+	// Signer wraps a phone's configuration profile in CMS, which iOS requires before it will read one.
+	Signer ProfileSigner
+}
+
+// ProfileSigner signs a configuration profile. The proxy's CA implements it.
+type ProfileSigner interface {
+	SignCMS(data []byte) ([]byte, error)
 }
 
 func (t ProxyTarget) Addr() string { return fmt.Sprintf("%s:%d", t.Host, t.Port) }

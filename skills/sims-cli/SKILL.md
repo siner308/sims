@@ -191,4 +191,5 @@ Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds
 | `this build cannot update itself` | Installed with `go install`; rerun the install line or `go install ...@latest`. |
 | `<platform> cannot be pointed at a proxy from here` | Traffic capture needs a running emulator, simulator or paired phone. |
 | proxy rows all say `tunnel` on Android | The app does not trust user certificates. Add `<certificates src="user" />` to its debug `network_security_config`, or capture a debug build. |
-| `a phone takes its proxy from the wifi network it is on` | Run it on a Mac joined to wifi; a phone's proxy profile attaches to a named network. |
+| `a phone takes its proxy from the wifi network it is on, and this Mac is not on one` | Join the Mac to the phone's wifi network; a phone's proxy profile attaches to a named one. Or `sims proxy ca <phone> --install` and set the proxy on the phone by hand. |
+| A phone profile fails with OSStatus -25257 | The profile reached devicectl unsigned. sims signs it with its own CA; an older build did not. |

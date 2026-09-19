@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/smallstep/pkcs7"
 )
 
 const (
@@ -182,6 +184,21 @@ func (c *CA) Fingerprint() string {
 
 // NotAfter is when the root itself expires.
 func (c *CA) NotAfter() time.Time { return c.cert.NotAfter }
+
+// SignCMS wraps data in a CMS/PKCS#7 signature made with this CA. An iOS configuration profile has
+// to arrive signed: devicectl reads an unsigned one as a provisioning profile and refuses it with
+// "CMS/PKCS#7 envelope is invalid".
+func (c *CA) SignCMS(data []byte) ([]byte, error) {
+	signed, err := pkcs7.NewSignedData(data)
+	if err != nil {
+		return nil, err
+	}
+	signed.SetDigestAlgorithm(pkcs7.OIDDigestAlgorithmSHA256)
+	if err := signed.AddSigner(c.cert, c.key, pkcs7.SignerInfoConfig{}); err != nil {
+		return nil, err
+	}
+	return signed.Finish()
+}
 
 // Leaf returns a server certificate for host (a DNS name or an IP), signing one the first time and
 // again once a cached one is within a day of expiring.
