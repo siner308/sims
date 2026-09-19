@@ -78,7 +78,9 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 It prints one line per exchange (`--json` prints a record per flow) and restores the device and this
 machine on exit. An iOS simulator has no network settings of its own, so its capture points this Mac's
 web proxy at sims for as long as it runs; other apps on the Mac are relayed untouched and are not
-captured unless `--all` is given. A `tunnel` line is traffic sims could not open, which means the app
+captured unless `--all` is given. A device's connections do not say which app opened them, so traffic captured from a phone or an emulator is the whole device's; only a simulator or this machine names the sending process. Never report a captured request as a particular app's unless the flow's `process` field says so.
+
+A `tunnel` line is traffic sims could not open, which means the app
 pins its certificate: that is a limit of every proxy, not a failure to report.
 
 ## JSON shapes

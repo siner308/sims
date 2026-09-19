@@ -198,8 +198,8 @@ func (e entry) render(filter string, d detail) string {
 	stamp := fmt.Sprintf("[gray]%s[-]", e.at.Format("15:04:05.000"))
 	switch e.kind {
 	case entryRequest:
-		head := fmt.Sprintf("%s  [aqua]→[-] %s %s",
-			stamp, highlight(e.flow.Method, filter), highlight(requestLabel(e.flow), filter))
+		head := fmt.Sprintf("%s  [aqua]→[-] %s %s%s",
+			stamp, highlight(e.flow.Method, filter), highlight(requestLabel(e.flow), filter), senderNote(e.flow))
 		return head + detailBlock(d, e.flow.ReqHeader, e.flow.ReqBody, e.flow.ReqSize, e.flow.ReqTruncated)
 	case entryResponse:
 		head := fmt.Sprintf("%s  %s %s %s %s",
@@ -254,6 +254,16 @@ func detailBlock(d detail, header http.Header, body []byte, size int64, truncate
 		fmt.Fprintf(&b, "\n%s[gray]...the rest was not kept[-]", detailIndent)
 	}
 	return b.String()
+}
+
+// senderNote names the process behind a request when the platform lets sims see one. On a phone it
+// cannot, and the absence is the honest answer: the row is the device's traffic, not provably the
+// app whose log is on the same screen.
+func senderNote(f proxy.Flow) string {
+	if f.Process == "" {
+		return ""
+	}
+	return fmt.Sprintf("  [gray]%s[-]", tview.Escape(f.Process))
 }
 
 func requestLabel(f proxy.Flow) string {

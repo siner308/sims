@@ -46,6 +46,8 @@ type logsView struct {
 	watchOff chan struct{}
 	// cursor is the id of the exchange the reader has stepped to, empty when none is selected.
 	cursor string
+	// warnedDeviceWide keeps the "traffic is the whole device" notice to once per view.
+	warnedDeviceWide bool
 	// opened says how much of each exchange is shown; the cursor's own level is kept separately so
 	// opening one does not open every one.
 	opened map[string]detail
@@ -106,7 +108,19 @@ func (v *logsView) toggleTraffic() {
 		v.session = s
 		v.app.drawHeader()
 		v.Refresh()
+		v.warnTrafficIsDeviceWide()
 	})
+}
+
+// warnTrafficIsDeviceWide is shown once per mixed view scoped to an app. Without it the app's name
+// in the title reads as if every request below came from that app, and on a device none of them is
+// knowably its own.
+func (v *logsView) warnTrafficIsDeviceWide() {
+	if v.only == nil || v.warnedDeviceWide {
+		return
+	}
+	v.warnedDeviceWide = true
+	v.app.flash(fmt.Sprintf("the log is %s's; the traffic is everything %s sends", v.only.Name, v.dev.Name))
 }
 
 // watchTraffic follows the capture's store on a timer, the same way the flows view does: a busy app
@@ -488,14 +502,18 @@ func (v *logsView) redraw() {
 }
 
 func (v *logsView) title() string {
-	what := "logs"
-	if v.mixing() {
-		what = fmt.Sprintf("logs+traffic :%d", v.session.Port)
+	if !v.mixing() {
+		if v.only != nil {
+			return fmt.Sprintf(" logs @ %s / %s ", v.dev.Name, v.only.Name)
+		}
+		return fmt.Sprintf(" logs @ %s ", v.dev.Name)
 	}
+	// the log can be one app's, the traffic never is: a device's connections do not say which app
+	// opened them, so the title says whose each half is rather than putting one name over both
 	if v.only != nil {
-		return fmt.Sprintf(" %s @ %s / %s ", what, v.dev.Name, v.only.Name)
+		return fmt.Sprintf(" logs of %s + traffic of %s :%d ", v.only.Name, v.dev.Name, v.session.Port)
 	}
-	return fmt.Sprintf(" %s @ %s ", what, v.dev.Name)
+	return fmt.Sprintf(" logs+traffic @ %s :%d ", v.dev.Name, v.session.Port)
 }
 
 func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {

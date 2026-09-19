@@ -8,6 +8,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
 )
 
@@ -33,7 +34,7 @@ func (v *appsView) Hints() []hint {
 	return []hint{
 		{"enter", "launch"}, {"i", "install (os dialog)"}, {"shift+i", "install (tui picker)"}, {"ctrl+u", "uninstall"},
 		groupBreak,
-		{"s", "toggle preinstalled"}, {"l", "logs of this app"}, {"/", "filter"},
+		{"s", "toggle preinstalled"}, {"l", "logs of this app"}, {"t", "this app's log with the device's traffic"}, {"/", "filter"},
 		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 	}
@@ -141,10 +142,34 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		} else {
 			v.app.replaceTop(newLogsView(v.app, v.dev, nil))
 		}
+	case ev.Rune() == 't':
+		v.watchWithApp()
 	default:
 		return ev
 	}
 	return nil
+}
+
+// watchWithApp opens this app's log with the device's traffic running through it. The log is the
+// app's alone; the traffic is everything the device sends, because a device's connections do not say
+// which app opened them. Seeing the two together is what says whether a request followed what the
+// app just logged.
+func (v *appsView) watchWithApp() {
+	app, ok := v.selected()
+	if !ok {
+		// with nothing selected there is no log to narrow, so this is the device's own mixed view
+		withCapture(v.app, v.dev, func(s *capture.Session) {
+			logs := newLogsView(v.app, v.dev, nil)
+			logs.session = s
+			v.app.push(logs)
+		})
+		return
+	}
+	withCapture(v.app, v.dev, func(s *capture.Session) {
+		logs := newLogsView(v.app, v.dev, &app)
+		logs.session = s
+		v.app.push(logs)
+	})
 }
 
 // The OS dialog runs off the UI goroutine; a platform without one falls back to the TUI picker.

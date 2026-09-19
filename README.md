@@ -153,6 +153,12 @@ that, and got a 401 back" reads top to bottom instead of being matched across tw
 platforms' log timestamps are read for the ordering, and a line sims cannot date keeps the place it
 arrived in. `t` takes the traffic back out, `ctrl+k` stops the capture and leaves the log running.
 
+From the apps view, `t` opens the selected app's log with the device's traffic beside it. The two
+halves have different scopes and the screen says so: the log is that app's, the traffic is
+everything the device sends. A device's connections do not carry the app that opened them, so a
+request is never labelled with the app whose log is on screen. Where sims can see the sender, on a
+simulator or on this machine, the row carries its process name.
+
 In that stream `n` and `shift+n` step between exchanges and `o` opens the one selected, in place:
 once for its headers, again for its body, a third time to fold it away. `shift+o` opens every
 exchange at once, for reading a whole conversation. The request and the response open separately,
@@ -287,6 +293,7 @@ sims skill > SKILL.md                   # for any other agent
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
 | devices | `shift+p` `shift+v` `shift+n` `shift+m` `shift+r` `shift+s` `shift+l` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
 | apps | `enter` / `i` / `shift+i` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |
+| apps | `t` | the selected app's log with the device's traffic beside it; the traffic is the whole device, which the title says |
 | apps | `l` | logs of the selected app only (android: `logcat --pid`, so the app must be running; ios: `log stream --predicate`) |
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
