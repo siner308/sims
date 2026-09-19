@@ -33,11 +33,16 @@ type flowsView struct {
 	// deviceOnly hides this machine's own apps. A capture only opens the device's traffic, so this
 	// matters where the scope was widened to take the machine's too.
 	deviceOnly bool
-	stop       chan struct{}
+	// byDomain groups the table by host. A phone's connections do not say which app opened them, so
+	// the domain is the handle a reader has instead.
+	byDomain bool
+	// collapsed holds the domains folded shut while grouped; a domain absent from it is open.
+	collapsed map[string]bool
+	stop      chan struct{}
 }
 
 func newFlowsView(a *App, d device.Device, s *capture.Session) *flowsView {
-	v := &flowsView{app: a, dev: d, session: s, table: newTable()}
+	v := &flowsView{app: a, dev: d, session: s, table: newTable(), collapsed: map[string]bool{}}
 	v.table.SetInputCapture(v.onKey)
 	v.table.SetTitle(v.title())
 	return v
@@ -49,6 +54,8 @@ func (v *flowsView) Hints() []hint {
 	return []hint{
 		{"enter", "inspect"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
 		{"d", "device only"}, {"s", "save har"}, {"l", "mix with the log"},
+		groupBreak,
+		{"g", "group by domain"}, {"space", "fold a domain"}, {"shift+g", "fold or unfold all"},
 		groupBreak,
 		{"ctrl+k", "stop capture"}, {"esc", "back (keeps capturing)"},
 	}
@@ -126,6 +133,10 @@ func (v *flowsView) visible() []proxy.Flow {
 }
 
 func (v *flowsView) render() {
+	if v.byDomain {
+		v.renderGrouped()
+		return
+	}
 	selectedID := int64(0)
 	if f, ok := v.selected(); ok {
 		selectedID = f.ID
@@ -153,6 +164,120 @@ func (v *flowsView) render() {
 	}
 	v.table.Select(want, 0)
 	v.table.SetTitle(v.title())
+}
+
+// renderGrouped draws one row per domain with its exchanges under it, so a device whose traffic
+// cannot be split by app can still be read a service at a time.
+func (v *flowsView) renderGrouped() {
+	selectedID := int64(0)
+	selectedHost := ""
+	switch cur := v.currentRow().(type) {
+	case proxy.Flow:
+		selectedID = cur.ID
+	case domainGroup:
+		selectedHost = cur.Host
+	}
+
+	v.table.Clear()
+	setHeader(v.table, "", "DOMAIN / PATH", "STATUS", "SIZE", "TIME", "FROM")
+	row, want := 1, 1
+	for _, g := range groupByDomain(v.visible()) {
+		mark := "\u25be" // ▾ open
+		if v.collapsed[g.Host] {
+			mark = "\u25b8" // ▸ folded
+		}
+		if g.Host == selectedHost {
+			want = row
+		}
+		v.table.SetCell(row, 0, tview.NewTableCell("[aqua]"+mark+"[-]").SetReference(g).SetMaxWidth(2))
+		v.table.SetCell(row, 1, tview.NewTableCell("[::b]"+highlight(g.Host, v.filter)+"[::-]").SetExpansion(2))
+		v.table.SetCell(row, 2, tview.NewTableCell(g.summary()).SetExpansion(1))
+		v.table.SetCell(row, 3, tview.NewTableCell(""))
+		v.table.SetCell(row, 4, tview.NewTableCell(relativeTime(g.Last, time.Now())).SetTextColor(tcell.ColorGray).SetMaxWidth(10))
+		v.table.SetCell(row, 5, tview.NewTableCell(groupSenders(g)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
+		row++
+		if v.collapsed[g.Host] {
+			continue
+		}
+		for _, f := range g.Flows {
+			if f.ID == selectedID {
+				want = row
+			}
+			v.table.SetCell(row, 0, tview.NewTableCell(kindMark(f)).SetReference(f).SetMaxWidth(2))
+			v.table.SetCell(row, 1, tview.NewTableCell("  "+highlight(f.Method+" "+pathOf(f), v.filter)).SetExpansion(2))
+			v.table.SetCell(row, 2, tview.NewTableCell(statusCell(f)).SetExpansion(1))
+			v.table.SetCell(row, 3, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
+			v.table.SetCell(row, 4, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(10))
+			v.table.SetCell(row, 5, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
+			row++
+		}
+	}
+	if row == 1 {
+		v.table.SetCell(1, 0, tview.NewTableCell(v.emptyMessage()).SetSelectable(false))
+	}
+	v.table.Select(want, 0)
+	v.table.SetTitle(v.title())
+}
+
+// groupSenders names the processes behind a domain's traffic when the platform lets sims see them,
+// and stays empty on a device where it cannot.
+func groupSenders(g domainGroup) string {
+	seen := map[string]bool{}
+	var names []string
+	for _, f := range g.Flows {
+		if f.Process == "" || seen[f.Process] {
+			continue
+		}
+		seen[f.Process] = true
+		names = append(names, f.Process)
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	}
+	return fmt.Sprintf("%s +%d", names[0], len(names)-1)
+}
+
+// currentRow is whatever the cursor is on: an exchange, or a domain heading while grouped.
+func (v *flowsView) currentRow() any {
+	row, _ := v.table.GetSelection()
+	cell := v.table.GetCell(row, 0)
+	if cell == nil {
+		return nil
+	}
+	return cell.GetReference()
+}
+
+// toggleGroup folds or unfolds the domain the cursor is on.
+func (v *flowsView) toggleGroup() {
+	g, ok := v.currentRow().(domainGroup)
+	if !ok {
+		return
+	}
+	if v.collapsed[g.Host] {
+		delete(v.collapsed, g.Host)
+	} else {
+		v.collapsed[g.Host] = true
+	}
+	v.render()
+}
+
+// toggleAllGroups folds every domain, or opens every one when any is already folded.
+func (v *flowsView) toggleAllGroups() {
+	if !v.byDomain {
+		return
+	}
+	if len(v.collapsed) > 0 {
+		v.collapsed = map[string]bool{}
+		v.render()
+		return
+	}
+	for _, g := range groupByDomain(v.visible()) {
+		v.collapsed[g.Host] = true
+	}
+	v.render()
 }
 
 func (v *flowsView) emptyMessage() string {
@@ -249,7 +374,12 @@ func fromCell(f proxy.Flow) string {
 
 func (v *flowsView) title() string {
 	title := fmt.Sprintf(" proxy @ %s :%d ", v.dev.Name, v.session.Port)
-	title += fmt.Sprintf("[%d] ", len(v.visible()))
+	flows := v.visible()
+	if v.byDomain {
+		title += fmt.Sprintf("[%d in %d domains] ", len(flows), len(groupByDomain(flows)))
+	} else {
+		title += fmt.Sprintf("[%d] ", len(flows))
+	}
 	if v.filter != "" {
 		title += fmt.Sprintf("/%s ", v.filter)
 	}
@@ -275,6 +405,10 @@ func (v *flowsView) selected() (proxy.Flow, bool) {
 func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	switch ev.Key() {
 	case tcell.KeyEnter:
+		if _, ok := v.currentRow().(domainGroup); ok {
+			v.toggleGroup()
+			return nil
+		}
 		if f, ok := v.selected(); ok {
 			v.app.push(newFlowView(v.app, v.session, f.ID))
 		}
@@ -287,6 +421,14 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		return ev
 	}
 	switch ev.Rune() {
+	case 'g':
+		v.byDomain = !v.byDomain
+		v.app.drawHeader()
+		v.render()
+	case 'G':
+		v.toggleAllGroups()
+	case ' ':
+		v.toggleGroup()
 	case '/':
 		v.app.prompt("filter:", v.filter, func(s string) { v.filter = s; v.render() })
 	case 'c':

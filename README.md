@@ -143,6 +143,12 @@ because it was killed outright or the machine lost power, it leaves a note of wh
 next capture, the next `sims` start and `sims proxy clean` each read that note and undo the rest, so
 a machine is never left pointing at a proxy that is gone.
 
+`g` groups the table by domain, which is the handle left when a device will not say which app sent
+what. Each domain carries how many exchanges it holds, how much came back, and how many answered
+4xx/5xx, errored outright or could not be opened, so a service in trouble shows without being
+unfolded. `space` folds one domain, `shift+g` folds or unfolds them all, and the list keeps the most
+recently active domain at the top.
+
 What sims could not read is still listed rather than hidden. An app that pins its certificate refuses
 every proxy, sims included; those rows show as `tunnel` and say why, which is the difference between
 a limit and a bug.
@@ -288,6 +294,7 @@ sims skill > SKILL.md                   # for any other agent
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
 | devices | `t` | watch the device's HTTP traffic; press it again later to reopen a running capture |
 | proxy | `enter` `/` `c` `p` `d` `s` | inspect one exchange, filter, clear, pause, hide this machine's own apps, save a HAR file |
+| proxy | `g` / `space` / `shift+g` | group by domain (`enter` on a heading folds it) / fold one domain / fold or unfold every domain |
 | proxy | `ctrl+k` / `esc` | stop the capture and restore every setting / leave the view with the capture running |
 | flow | `tab` / `shift+tab` | overview, request, response |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
