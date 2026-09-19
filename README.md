@@ -235,6 +235,8 @@ apps on the Mac keep working, because traffic that is not the device's is relaye
 captured. `--all` widens that to everything the proxy receives. The root certificate lives in the user
 cache directory and is reused, so `proxy ca --install` is a one-off per device.
 
+`SIMS_PROXY_DIR` moves the root certificate, its key and the in-flight note somewhere other than the user cache directory.
+
 `--image` and `--type` take an id or a name from the matching `list`, and the image must be installed (`sims image install` for Android). Without `--type`, Android takes `pixel_7` and iOS takes `iPhone 17 Pro`; when the SDK has neither, the first iPhone simctl lists (its newest), else the first type that can run the image. `--ram`, `--cores` and `--disk` are refused on iOS. `connect` and `pair` by address give adb 20 seconds, because `adb connect` blocks for over a minute on an unreachable host.
 
 Exit status is 0 on success and 1 on any failure, with the reason on stderr; an argument or flag mistake adds a `--help` hint, a device that is not found does not. A listing whose one platform failed still prints the other and reports the failure on stderr, so a broken adb does not hide the simulators. Nothing asks for confirmation: `erase`, `delete` and `uninstall` act at once, the way `adb` and `simctl` do, and the TUI keeps its ctrl chords and prompts.

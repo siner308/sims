@@ -3,6 +3,8 @@ package capture_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -302,5 +304,38 @@ func TestCleanDropsTheJournalEvenWhenTheDeviceIsGone(t *testing.T) {
 	}
 	if l := capture.FindLeftover(dir); l.Found() {
 		t.Error("the journal survived a failed cleanup, so the warning would never go away")
+	}
+}
+
+// A note whose process is still running belongs to a live capture. Treating it as leftover work
+// would pull the settings out from under a capture the user is watching.
+func TestLiveCapturesNoteIsNotLeftoverWork(t *testing.T) {
+	dir := t.TempDir()
+	p := newFake()
+	s, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+
+	// the note names this test's own pid, which is very much alive
+	if l := capture.FindLeftover(dir); l.Found() {
+		t.Errorf("a running capture's note was taken for leftover work: %s", l)
+	}
+}
+
+// The note survives a process that never ran any cleanup code at all, which is what a power cut
+// looks like from the next run's point of view.
+func TestNoteSurvivesAProcessThatNeverCleanedUp(t *testing.T) {
+	dir := t.TempDir()
+	p := newFake()
+	if _, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	// deliberately no Stop: the session is abandoned exactly as a killed process abandons it
+
+	// from another run's point of view the note is there; only the live pid hides it
+	if _, err := os.Stat(filepath.Join(dir, "in-flight.json")); err != nil {
+		t.Fatalf("the capture left no note for a later run to act on: %v", err)
 	}
 }

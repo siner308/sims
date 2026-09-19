@@ -306,10 +306,14 @@ func (s *Session) Stop() error {
 	return errors.Join(errs...)
 }
 
-// DefaultCertDir is where the root certificate and its key live between runs. The error is passed
-// on rather than falling back to a temp directory: a CA key belongs in the user's own cache, not
+// DefaultCertDir is where the root certificate, its key and the in-flight note live between runs.
+// SIMS_PROXY_DIR moves all three, which a test uses to stay off the real one. The error is passed on
+// rather than falling back to a temp directory: a CA key belongs in the user's own cache, not
 // somewhere every account on the machine can reach.
 func DefaultCertDir() (string, error) {
+	if dir := os.Getenv("SIMS_PROXY_DIR"); dir != "" {
+		return dir, nil
+	}
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("no user cache directory for the proxy certificate: %w", err)
