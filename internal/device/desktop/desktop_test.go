@@ -1,12 +1,16 @@
 package desktop_test
 
 import (
+	"encoding/pem"
 	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/siner308/sims/internal/device"
 	"github.com/siner308/sims/internal/device/desktop"
+	"github.com/siner308/sims/internal/proxy"
 )
 
 func provider(t *testing.T) *desktop.Provider {
@@ -113,4 +117,69 @@ func TestCaptureAsksForTrustInsteadOfHanging(t *testing.T) {
 	if !sawManualCert {
 		t.Errorf("an untrusted certificate produced no manual step: %+v", steps)
 	}
+}
+
+// A certificate already in this Mac's login keychain must not produce the manual step again: a
+// second capture asking for the same password would look like a bug. The check has to read the
+// keychain, because x509.SystemCertPool is empty on macOS.
+func TestAlreadyTrustedCertificateAsksForNothing(t *testing.T) {
+	p := provider(t)
+	existing := loginKeychainCertPEM(t)
+	d := device.Device{ID: desktop.ID, Kind: device.KindHost, Platform: device.PlatformDesktop}
+
+	steps, err := p.SetProxy(t.Context(), d, device.ProxyTarget{
+		Host: "127.0.0.1", Port: 9090, CACert: existing, CertName: "a certificate already in the keychain",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range steps {
+		if s.Title == "certificate" && s.Manual {
+			t.Errorf("a certificate already in the keychain asked to be installed again: %q", s.Detail)
+		}
+	}
+}
+
+// An unknown certificate, which is what a fresh sims CA is, must ask.
+func TestUnknownCertificateAsks(t *testing.T) {
+	p := provider(t)
+	ca, err := proxy.LoadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := device.Device{ID: desktop.ID, Kind: device.KindHost, Platform: device.PlatformDesktop}
+	steps, err := p.SetProxy(t.Context(), d, device.ProxyTarget{
+		Host: "127.0.0.1", Port: 9090, CACert: ca.CertPEM(), CertName: "sims proxy CA",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked bool
+	for _, s := range steps {
+		if s.Title == "certificate" && s.Manual {
+			asked = true
+		}
+	}
+	if !asked {
+		t.Errorf("a certificate this Mac does not trust produced no step to install it: %+v", steps)
+	}
+}
+
+// loginKeychainCertPEM returns a certificate already in the user's login keychain.
+func loginKeychainCertPEM(t *testing.T) []byte {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	out, err := exec.Command("security", "find-certificate", "-a", "-p",
+		home+"/Library/Keychains/login.keychain-db").Output()
+	if err != nil {
+		t.Skip(err)
+	}
+	block, _ := pem.Decode(out)
+	if block == nil {
+		t.Skip("the login keychain holds no certificate to test with")
+	}
+	return pem.EncodeToMemory(block)
 }

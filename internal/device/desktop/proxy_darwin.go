@@ -69,7 +69,10 @@ func (p *Provider) TrustCert(ctx context.Context, certPEM []byte) error {
 }
 
 // trustedHere reports whether this certificate is already in the user's keychain, so a second
-// capture does not ask again.
+// capture does not ask for the same password again.
+//
+// x509.SystemCertPool cannot answer this on macOS: it comes back with no subjects, because Go hands
+// verification to the platform instead of holding the roots itself. The keychain is asked directly.
 func trustedHere(certPEM []byte) bool {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
@@ -79,12 +82,26 @@ func trustedHere(certPEM []byte) bool {
 	if err != nil {
 		return false
 	}
-	pool, err := x509.SystemCertPool()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	_, err = cert.Verify(x509.VerifyOptions{Roots: pool})
-	return err == nil
+	out, err := exec.Command("security", "find-certificate", "-a", "-p",
+		home+"/Library/Keychains/login.keychain-db").Output()
+	if err != nil {
+		return false
+	}
+	rest := out
+	for {
+		var b *pem.Block
+		b, rest = pem.Decode(rest)
+		if b == nil {
+			return false
+		}
+		if have, err := x509.ParseCertificate(b.Bytes); err == nil && have.Equal(cert) {
+			return true
+		}
+	}
 }
 
 // ClearProxy leaves the certificate in place, the way the simulator path does: a capture the user

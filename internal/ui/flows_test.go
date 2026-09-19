@@ -40,17 +40,23 @@ func emulator() device.Device {
 func startFlowsView(t *testing.T) (*App, *flowsView, *capture.Session, func()) {
 	t.Helper()
 	prov := &proxyProvider{fakeProvider: &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{emulator()}}}
+	return startFlowsViewFor(t, prov, emulator())
+}
+
+// startFlowsViewFor opens a capture on any device, so the host can be exercised the same way.
+func startFlowsViewFor(t *testing.T, prov *proxyProvider, d device.Device) (*App, *flowsView, *capture.Session, func()) {
+	t.Helper()
 	a := New("test", sims.New(prov))
 	_, stop := runHeadless(t, a)
 
-	session, err := a.m.StartCapture(t.Context(), emulator(), capture.Options{CertDir: t.TempDir()})
+	session, err := a.m.StartCapture(t.Context(), d, capture.Options{CertDir: t.TempDir()})
 	if err != nil {
 		stop()
 		t.Fatal(err)
 	}
 	var v *flowsView
 	a.tv.QueueUpdate(func() {
-		v = newFlowsView(a, emulator(), session)
+		v = newFlowsView(a, d, session)
 		a.push(v)
 	})
 	waitFor(t, a, 5*time.Second, func() bool { return v != nil })
