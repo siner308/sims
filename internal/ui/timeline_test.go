@@ -224,3 +224,64 @@ func TestTunnelHasNothingToOpen(t *testing.T) {
 		t.Error("a tunnel printed a response block it never read")
 	}
 }
+
+// A url can be longer than the terminal is wide, and whatever follows it wraps out of sight with
+// it. The size and the timing go in front of the url for that reason, and the columns before it are
+// held to a fixed width so every url starts in the same place.
+func TestSizeAndTimingComeBeforeTheURL(t *testing.T) {
+	long := "https://cdn.example.com/a/very/long/path/that/keeps/going/and/going/asset-9f2a1c.png"
+	f := proxy.Flow{
+		Method: "GET", URL: long, Host: "cdn.example.com", Kind: proxy.KindHTTP,
+		Done: true, Status: 200, RespSize: 284912, Duration: 1204 * time.Millisecond,
+	}
+	row := plainRow(entry{kind: entryExchange, flow: f, at: time.Now()}.render("", detailLine))
+
+	urlAt := strings.Index(row, long)
+	if urlAt < 0 {
+		t.Fatalf("the url is missing from the row: %q", row)
+	}
+	for _, before := range []string{"278.2 kB", "1204ms", "200"} {
+		at := strings.Index(row, before)
+		if at < 0 {
+			t.Errorf("the row does not show %q: %q", before, row)
+			continue
+		}
+		if at > urlAt {
+			t.Errorf("%q sits after the url, where a wrap hides it: %q", before, row)
+		}
+	}
+
+	// every url starts in the same column, whatever the size, timing and method around it
+	short := proxy.Flow{
+		Method: "CONNECT", URL: "https://api.example.com/v1/me", Host: "api.example.com",
+		Kind: proxy.KindHTTP, Done: true, Status: 404, RespSize: 42, Duration: 8 * time.Millisecond,
+	}
+	other := plainRow(entry{kind: entryExchange, flow: short, at: time.Now()}.render("", detailLine))
+	if a, b := strings.Index(row, "https://"), strings.Index(other, "https://"); a != b {
+		t.Errorf("the urls start in different columns, %d and %d:\n%s\n%s", a, b, row, other)
+	}
+}
+
+// A call still out, and one that failed, have no size or timing. The column still has to hold its
+// place or the urls below it step out of line.
+func TestTheSizeColumnHoldsItsPlaceWithNothingToShow(t *testing.T) {
+	done := proxy.Flow{Method: "GET", URL: "https://api.example.com/a", Host: "api.example.com",
+		Kind: proxy.KindHTTP, Done: true, Status: 200, RespSize: 10, Duration: time.Millisecond}
+	running := proxy.Flow{Method: "GET", URL: "https://api.example.com/b", Host: "api.example.com",
+		Kind: proxy.KindHTTP}
+	failed := proxy.Flow{Method: "GET", URL: "https://api.example.com/c", Host: "api.example.com",
+		Kind: proxy.KindHTTP, Done: true, Error: "connection refused"}
+
+	var at []int
+	for _, f := range []proxy.Flow{done, running, failed} {
+		row := plainRow(entry{kind: entryExchange, flow: f, at: time.Now()}.render("", detailLine))
+		i := strings.Index(row, "https://")
+		if i < 0 {
+			t.Fatalf("no url in %q", row)
+		}
+		at = append(at, i)
+	}
+	if at[0] != at[1] || at[1] != at[2] {
+		t.Errorf("the urls do not line up: %v", at)
+	}
+}

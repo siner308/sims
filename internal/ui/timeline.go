@@ -208,9 +208,10 @@ func (e entry) render(filter string, d detail) string {
 	if e.kind == entryLog {
 		return fmt.Sprintf("%s  %s", stamp, highlight(stripLogTime(e.text), filter))
 	}
-	head := fmt.Sprintf("%s  %s %s %s%s%s",
-		stamp, outcomeCell(e.flow), highlight(e.flow.Method, filter),
-		highlight(requestLabel(e.flow), filter), sizeAndTiming(e.flow), senderNote(e.flow))
+	// size and timing come before the url: a long url wraps, and anything after it wraps with it
+	head := fmt.Sprintf("%s  %s %s %s %s%s",
+		stamp, outcomeCell(e.flow), sizeAndTiming(e.flow), methodCell(e.flow.Method, filter),
+		highlight(requestLabel(e.flow), filter), trailingNote(e.flow))
 	if d == detailLine {
 		return head
 	}
@@ -237,15 +238,46 @@ func outcomeCell(f proxy.Flow) string {
 	return statusCell(f)
 }
 
-// sizeAndTiming is what the response added to the line, left off while the call is still out.
+// sizeAndTiming is what the response added to the line. It is padded to a fixed width so the urls
+// under each other start in the same column instead of stepping in and out with each size.
 func sizeAndTiming(f proxy.Flow) string {
-	if !f.Done {
-		return ""
+	if !f.Done || f.Error != "" {
+		// nothing measured yet, or nothing to measure: the column still has to hold its place
+		return fmt.Sprintf("[gray]%*s[-]", sizeWidth+timingWidth+1, "")
 	}
+	return fmt.Sprintf("[gray]%*s %*s[-]",
+		sizeWidth, proxy.SizeString(f.RespSize),
+		timingWidth, fmt.Sprintf("%dms", f.Duration.Milliseconds()))
+}
+
+// methodCell pads the method so every url starts in the same column. A method wider than the pad
+// pushes its own url along rather than being cut short.
+func methodCell(method, filter string) string {
+	pad := methodWidth - len([]rune(method))
+	if pad < 0 {
+		pad = 0
+	}
+	return highlight(method, filter) + strings.Repeat(" ", pad)
+}
+
+// methodWidth fits the verbs in ordinary use; CONNECT and OPTIONS are the longest.
+const methodWidth = 7
+
+// sizeWidth and timingWidth hold the two columns still. "999.9 kB" and a five digit millisecond
+// count are the widest ordinary values; anything longer pushes the url along rather than being cut.
+const (
+	sizeWidth   = 8
+	timingWidth = 7
+)
+
+// trailingNote is what goes after the url, where a long one may wrap it out of sight: the sender,
+// and the reason a failed exchange has no size or timing to show.
+func trailingNote(f proxy.Flow) string {
+	note := senderNote(f)
 	if f.Error != "" {
-		return "  [red]" + tview.Escape(f.Error) + "[-]"
+		note = "  [red]" + tview.Escape(f.Error) + "[-]" + note
 	}
-	return fmt.Sprintf("  [gray]%s %dms[-]", proxy.SizeString(f.RespSize), f.Duration.Milliseconds())
+	return note
 }
 
 // detailIndent lines the opened text up under the summary rather than against the left edge, so the
