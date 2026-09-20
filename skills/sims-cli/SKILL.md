@@ -195,5 +195,6 @@ Exit status is 1 and the reason is on stderr after `sims:`. A usage mistake adds
 | `<platform> cannot be pointed at a proxy from here` | Traffic capture needs a running emulator, simulator or paired phone. |
 | proxy rows all say `tunnel` on Android | The app does not trust user certificates. Add `<certificates src="user" />` to its debug `network_security_config`, or capture a debug build. |
 | `a phone takes its proxy from the wifi network it is on, and this Mac is not on one` | Join the Mac to the phone's wifi network; a phone's proxy profile attaches to a named one. Or `sims proxy ca <phone> --install` and set the proxy on the phone by hand. |
+| A capture reports the device configured but records nothing | The device may have refused the setting. sims reads it back now and errors instead, so an older build is the likely cause; rerun with the current one. |
 | The machine still goes through a proxy after a capture was killed | `sims proxy clean`. A capture killed outright cannot restore anything itself; the next capture and the next `sims` start also offer to. |
 | A phone profile fails with OSStatus -25257 | The profile reached devicectl unsigned. sims signs it with its own CA; an older build did not. |

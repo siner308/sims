@@ -140,9 +140,10 @@ capture, because macOS puts up an authorisation panel: `sims proxy ca localhost 
 lists the same way and trusts through `certutil -user`.
 
 A capture puts every setting back when it stops, including on ctrl+c or a SIGTERM. When it cannot,
-because it was killed outright or the machine lost power, it leaves a note of what it changed: the
-next capture, the next `sims` start and `sims proxy clean` each read that note and undo the rest, so
-a machine is never left pointing at a proxy that is gone.
+because it was killed outright or the machine lost power, the record it wrote before changing
+anything is still there: the next capture, the next `sims` start and `sims proxy clean` each read
+those records and undo the rest, so a machine is never left pointing at a proxy that is gone. Each
+capture keeps its own record, so several running at once do not erase each other's.
 
 `g` groups the table by domain, which is the handle left when a device will not say which app sent
 what. Each domain carries how many exchanges it holds, how much came back, and how many answered
@@ -259,7 +260,7 @@ apps on the Mac keep working, because traffic that is not the device's is relaye
 captured. `--all` widens that to everything the proxy receives. The root certificate lives in the user
 cache directory and is reused, so `proxy ca --install` is a one-off per device.
 
-`SIMS_PROXY_DIR` moves the root certificate, its key and the in-flight note somewhere other than the user cache directory.
+`SIMS_PROXY_DIR` moves the root certificate, its key and the in-flight records somewhere other than the user cache directory.
 
 `--image` and `--type` take an id or a name from the matching `list`, and the image must be installed (`sims image install` for Android). Without `--type`, Android takes `pixel_7` and iOS takes `iPhone 17 Pro`; when the SDK has neither, the first iPhone simctl lists (its newest), else the first type that can run the image. `--ram`, `--cores` and `--disk` are refused on iOS. `connect` and `pair` by address give adb 20 seconds, because `adb connect` blocks for over a minute on an unreachable host.
 
