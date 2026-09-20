@@ -17,7 +17,10 @@ func TestTUIOffersToCleanLeftoverOnStart(t *testing.T) {
 	t.Setenv("SIMS_PROXY_DIR", dir)
 	// the note a capture killed outright would have left, with a pid that cannot be running
 	note := `{"pid":-1,"port":65123,"device":{"id":"avd1","name":"Pixel_7","platform":"android","kind":"virtual"}}`
-	if err := os.WriteFile(filepath.Join(dir, "in-flight.json"), []byte(note), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "in-flight"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "in-flight", "-1-65123.json"), []byte(note), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

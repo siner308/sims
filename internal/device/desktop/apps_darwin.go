@@ -1,12 +1,14 @@
 package desktop
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/siner308/sims/internal/device"
 )
@@ -23,16 +25,26 @@ func (p *Provider) Apps(ctx context.Context, _ device.Device) ([]device.App, err
 	for _, a := range running {
 		byBundle[a.BundleID] = a
 	}
+	runningByName := map[string]string{}
+	for _, a := range running {
+		runningByName[strings.ToLower(a.Name)] = a.BundleID
+	}
 	for _, a := range installedApps(ctx) {
-		if up, seen := byBundle[a.BundleID]; seen {
+		key := a.BundleID
+		// an app whose identifier could not be read is still the same app as the running one with
+		// its name, and must not appear twice
+		if id, same := runningByName[strings.ToLower(a.Name)]; same {
+			key = id
+		}
+		if up, seen := byBundle[key]; seen {
 			// a running app keeps its state but takes the version the bundle knows
 			if up.Version == "" && a.Version != "" {
 				up.Version = a.Version
-				byBundle[a.BundleID] = up
+				byBundle[key] = up
 			}
 			continue
 		}
-		byBundle[a.BundleID] = a
+		byBundle[key] = a
 	}
 	out := make([]device.App, 0, len(byBundle))
 	for _, a := range byBundle {
@@ -102,6 +114,11 @@ func installedApps(ctx context.Context) []device.App {
 			continue
 		}
 		for _, bundle := range matches {
+			// an alias to a volume that is not mounted cannot be launched and has nothing to read;
+			// listing it would offer the user an app that is not really here
+			if _, err := os.Stat(bundle); err != nil {
+				continue
+			}
 			name := strings.TrimSuffix(filepath.Base(bundle), ".app")
 			id, version := bundleInfo(bundle)
 			if id == "" {
@@ -125,12 +142,48 @@ func installedApps(ctx context.Context) []device.App {
 // bundleInfo reads an app's identifier and version from its Info.plist. An alias to a volume that
 // is not mounted, and anything else unreadable, comes back empty rather than as an error: the app
 // is still on the machine and still belongs in the list.
+//
+// A Mac app keeps the plist in Contents; an iPhone app running on this Mac is a wrapper whose real
+// bundle sits under Wrapper, and reading only the first would leave it with no identifier and a
+// second row of its own next to the one lsappinfo already reported.
 func bundleInfo(bundle string) (id, version string) {
-	body, err := os.ReadFile(filepath.Join(bundle, "Contents", "Info.plist"))
-	if err != nil {
-		return "", ""
+	for _, path := range plistCandidates(bundle) {
+		body, err := readPlistXML(path)
+		if err != nil {
+			continue
+		}
+		if id = plistString(body, "CFBundleIdentifier"); id != "" {
+			return id, plistString(body, "CFBundleShortVersionString")
+		}
 	}
-	return plistString(body, "CFBundleIdentifier"), plistString(body, "CFBundleShortVersionString")
+	return "", ""
+}
+
+// readPlistXML returns the plist as XML. Apple ships most of its own apps with the binary form,
+// which cannot be read as text, so plutil converts it; a plist that is already XML is read directly
+// and costs no process.
+func readPlistXML(path string) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.HasPrefix(body, []byte("bplist")) {
+		return body, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "plutil", "-convert", "xml1", "-o", "-", path).Output()
+}
+
+// plistCandidates is where an Info.plist can live: a Mac app's Contents, then the inner bundle of
+// an iPhone app's wrapper.
+func plistCandidates(bundle string) []string {
+	paths := []string{filepath.Join(bundle, "Contents", "Info.plist")}
+	inner, err := filepath.Glob(filepath.Join(bundle, "Wrapper", "*.app", "Info.plist"))
+	if err == nil {
+		paths = append(paths, inner...)
+	}
+	return paths
 }
 
 // plistString pulls one string value out of an Info.plist. Apple ships both the XML and the binary

@@ -150,12 +150,17 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 			s.Stop()
 			return nil, errors.New("a simulator follows this machine's proxy settings, which sims can only change on macOS")
 		}
-		if err := s.host.set(ctx, "127.0.0.1", port); err != nil {
+		// read and write the record down before changing anything: a process killed between the
+		// change and the record leaves a machine with no way back
+		if err := s.host.read(ctx, deadCapturePorts(dir)); err != nil {
 			s.Stop()
 			return nil, err
 		}
-		// now that the machine's own settings are changed, record what they were
 		s.writeJournal()
+		if err := s.host.apply(ctx, "127.0.0.1", port); err != nil {
+			s.Stop()
+			return nil, err
+		}
 		s.Steps = append(s.Steps, device.ProxyStep{
 			Title:  "this Mac",
 			Detail: "its web proxy now points at 127.0.0.1:" + fmt.Sprint(port) + " and goes back when the capture stops",
@@ -177,6 +182,19 @@ func listenHost(d device.Device) string {
 		return "0.0.0.0"
 	}
 	return "127.0.0.1"
+}
+
+// deadCapturePorts are the ports recorded by captures that are no longer running. A setting
+// pointing at one of them is wreckage this tool left, which is the only case where clearing a proxy
+// the user did not ask us to clear is the right thing to do.
+func deadCapturePorts(dir string) []int {
+	var ports []int
+	for _, j := range readJournals(dir) {
+		if j.Port > 0 && (j.PID <= 0 || !processAlive(j.PID)) {
+			ports = append(ports, j.Port)
+		}
+	}
+	return ports
 }
 
 // writeJournal records what this capture has changed, so a run that is killed before it can put
@@ -307,8 +325,13 @@ func (s *Session) Addr() string { return fmt.Sprintf(":%d", s.Port) }
 // Stop puts the device and this machine back and closes the proxy. It is safe to call twice, and it
 // runs every step even when one fails, so one error does not strand the rest.
 func (s *Session) Stop() error {
-	errs := []error{s.Err()}
+	var errs []error
 	s.stopped.Do(func() {
+		// only the first Stop reports it, and it is labelled: a proxy that died is not the same
+		// news as a machine whose settings could not be put back, and the second needs acting on
+		if err := s.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("the proxy stopped listening: %w", err))
+		}
 		if s.prov != nil && s.configured {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
@@ -324,8 +347,8 @@ func (s *Session) Stop() error {
 				errs = append(errs, err)
 			}
 		}
-		// everything is back, so there is nothing left for a later run to undo
-		removeJournal(s.certDir)
+		// everything this capture changed is back; another capture's record is not ours to remove
+		removeJournal(s.certDir, os.Getpid(), s.Port)
 	})
 	return errors.Join(errs...)
 }

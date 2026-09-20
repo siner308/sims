@@ -9,7 +9,11 @@ import (
 
 type hostProxy struct{}
 
-func (h *hostProxy) set(context.Context, string, int) error {
+func (h *hostProxy) read(context.Context, []int) error {
+	return errors.New("reading this machine's proxy settings is only implemented on macOS")
+}
+
+func (h *hostProxy) apply(context.Context, string, int) error {
 	return errors.New("pointing this machine at a proxy is only implemented on macOS")
 }
 

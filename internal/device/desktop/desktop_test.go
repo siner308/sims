@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -180,4 +181,96 @@ func loginKeychainCertPEM(t *testing.T) []byte {
 		t.Skip("the login keychain holds no certificate to test with")
 	}
 	return pem.EncodeToMemory(block)
+}
+
+// An app must appear once. An iPhone app running on this Mac is a wrapper whose identifier lives
+// under Wrapper rather than Contents, and reading only the latter left it unidentified and listed
+// twice: once as lsappinfo reported it and once as an installed bundle with no id.
+func TestAnAppAppearsOnce(t *testing.T) {
+	p := provider(t)
+	apps, err := p.Apps(t.Context(), device.Device{ID: desktop.ID, Kind: device.KindHost})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen := map[string]int{}
+	for _, a := range apps {
+		seen[a.BundleID]++
+	}
+	for id, n := range seen {
+		if n > 1 {
+			t.Errorf("%s appears %d times", id, n)
+		}
+	}
+
+	// two rows sharing a name must be genuinely different apps, not one app read two ways
+	byName := map[string][]string{}
+	for _, a := range apps {
+		byName[strings.ToLower(a.Name)] = append(byName[strings.ToLower(a.Name)], a.BundleID)
+	}
+	for name, ids := range byName {
+		if len(ids) < 2 {
+			continue
+		}
+		for _, id := range ids {
+			if strings.HasPrefix(id, "app:") {
+				t.Errorf("%q is listed both with and without an identifier: %v", name, ids)
+				break
+			}
+		}
+	}
+}
+
+// Apple ships most of its own apps with a binary Info.plist, which cannot be read as text. Reading
+// only XML left Keynote, Numbers and the rest with no identifier at all.
+func TestBinaryPlistAppsAreIdentified(t *testing.T) {
+	p := provider(t)
+	apps, err := p.Apps(t.Context(), device.Device{ID: desktop.ID, Kind: device.KindHost})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var unidentified []string
+	for _, a := range apps {
+		if strings.HasPrefix(a.BundleID, "app:") {
+			unidentified = append(unidentified, a.Name)
+		}
+	}
+	// a bundle whose plist genuinely has no CFBundleIdentifier still gets a name-derived one, so a
+	// handful is expected; a large share means the reader is broken again
+	if len(unidentified) > len(apps)/10 {
+		t.Errorf("%d of %d apps have no identifier: %v", len(unidentified), len(apps), unidentified)
+	}
+}
+
+// An alias to a volume that is not mounted cannot be launched and has nothing to read, so offering
+// it in the list would be offering an app that is not here.
+func TestBrokenAliasesAreNotListed(t *testing.T) {
+	p := provider(t)
+	apps, err := p.Apps(t.Context(), device.Device{ID: desktop.ID, Kind: device.KindHost})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range apps {
+		if a.Running {
+			continue
+		}
+		for _, dir := range []string{"/Applications", homeApps(t)} {
+			bundle := filepath.Join(dir, a.Name+".app")
+			if _, err := os.Lstat(bundle); err != nil {
+				continue
+			}
+			if _, err := os.Stat(bundle); err != nil {
+				t.Errorf("%s is a broken alias but is listed", a.Name)
+			}
+		}
+	}
+}
+
+func homeApps(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip(err)
+	}
+	return filepath.Join(home, "Applications")
 }

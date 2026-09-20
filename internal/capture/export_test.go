@@ -50,3 +50,6 @@ func SimulatorProcessNameForTest(p proxy.Process) string { return simulatorProce
 
 // NeedsHostProxyForTest exposes which devices borrow this machine's network settings.
 func NeedsHostProxyForTest(d device.Device) bool { return needsHostProxy(d) }
+
+// JournalsForTest returns the in-flight records on disk.
+func JournalsForTest(dir string) []journal { return readJournals(dir) }

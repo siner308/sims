@@ -2,11 +2,14 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -85,41 +88,85 @@ func readHostProxy(ctx context.Context, service, kind string) (netsetupState, er
 	return st, nil
 }
 
-// isDeadLoopbackProxy reports whether a setting points at a port on this machine that nothing
-// answers on: the fingerprint of a capture that was killed before it could restore anything.
-func isDeadLoopbackProxy(st netsetupState) bool {
-	if st.server != "127.0.0.1" && st.server != "localhost" && st.server != "::1" {
+// isAbandonedCaptureProxy reports whether a setting is the wreckage of a capture that was killed,
+// rather than a proxy the user chose. Getting this wrong in the permissive direction destroys
+// configuration sims never created and cannot rebuild, since restoring clears the address as well
+// as the state, so it takes evidence rather than a guess.
+//
+// A port a killed capture wrote down is proof. Without that, an unreachable loopback port is only
+// treated as wreckage once repeated attempts are refused outright: a connection refused means
+// nothing is listening, while a timeout or a permission error means a local firewall or a proxy
+// that is merely slow to restart, and those keep the user's setting.
+func isAbandonedCaptureProxy(st netsetupState, knownDeadPorts []int) bool {
+	if !isLoopbackHost(st.server) {
 		return false
 	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(st.server, strconv.Itoa(st.port)), 300*time.Millisecond)
-	if err != nil {
+	if slices.Contains(knownDeadPorts, st.port) {
 		return true
 	}
-	conn.Close()
+	addr := net.JoinHostPort(st.server, strconv.Itoa(st.port))
+	for attempt := range 3 {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		if err == nil {
+			conn.Close()
+			return false
+		}
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			// a timeout, or a firewall refusing us rather than the port being empty: unknown, so
+			// the user's setting stands
+			return false
+		}
+	}
+	return true
+}
+
+func isLoopbackHost(server string) bool {
+	switch server {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
 	return false
 }
 
 // set points the machine's web and secure web proxies at addr, remembering what was there.
-func (h *hostProxy) set(ctx context.Context, host string, port int) error {
+// read records what the machine's proxy settings are now, before anything is changed. It is
+// separate from apply so the caller can persist the record first: a process killed between changing
+// a setting and writing it down leaves a machine nobody can put back.
+func (h *hostProxy) read(ctx context.Context, knownDeadPorts []int) error {
 	service, err := activeService(ctx)
 	if err != nil {
 		return err
 	}
-	h.service = service
+	var before []netsetupState
 	for _, kind := range []string{"webproxy", "securewebproxy"} {
-		before, err := readHostProxy(ctx, service, kind)
+		st, err := readHostProxy(ctx, service, kind)
 		if err != nil {
 			return err
 		}
 		// A capture that died without restoring leaves the machine pointing at a loopback port that
-		// no longer listens. Treating that as the setting to put back would hand the dead proxy
-		// straight back to the user, so it is recorded as "was off" instead.
-		if before.enabled && isDeadLoopbackProxy(before) {
-			before.enabled, before.server, before.port = false, "", 0
+		// no longer listens. Putting that back would hand the dead proxy straight to the user, so
+		// it is recorded as "was off" instead.
+		if st.enabled && isAbandonedCaptureProxy(st, knownDeadPorts) {
+			st.enabled, st.server, st.port = false, "", 0
 		}
-		h.before = append(h.before, before)
-		if err := exec.CommandContext(ctx, "networksetup", "-set"+kind, service, host, strconv.Itoa(port)).Run(); err != nil {
-			return fmt.Errorf("could not point %s at the proxy: %w", service, err)
+		before = append(before, st)
+	}
+	// both kinds are recorded together, so a failure part way through leaves nothing half-written
+	h.service, h.before = service, before
+	return nil
+}
+
+// apply points the machine at the proxy. read must have run first.
+func (h *hostProxy) apply(ctx context.Context, host string, port int) error {
+	if h.service == "" {
+		return errors.New("the machine's proxy settings were never read")
+	}
+	for _, st := range h.before {
+		if err := exec.CommandContext(ctx, "networksetup", "-set"+st.kind, h.service, host, strconv.Itoa(port)).Run(); err != nil {
+			return fmt.Errorf("could not point %s at the proxy: %w", h.service, err)
 		}
 	}
 	return nil

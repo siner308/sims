@@ -7,14 +7,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/siner308/sims/internal/device"
 )
 
-// journalName is the file a running capture leaves behind so a later run can undo what a killed one
-// could not. SIGKILL, a panic or a power cut all skip Stop, and what they leave is a machine and a
+// journalDir holds one file per running capture, so a later run can undo what a killed one could
+// not: SIGKILL, a panic and a power cut all skip Stop, and what they leave is a machine and a
 // device pointing at a proxy that no longer exists.
-const journalName = "in-flight.json"
+//
+// It is a directory rather than one file because several captures run at once. With a single path
+// the second capture to start would overwrite the first one's record, and the first capture to stop
+// would delete a record still needed by the others, in both cases leaving a changed machine with
+// nothing on disk saying so.
+const journalDir = "in-flight"
 
 // journal is what has to be undone: it is written before the settings are changed and removed after
 // they are put back, so its presence means a capture did not finish.
@@ -43,33 +49,50 @@ type journalDevice struct {
 	Kind     string `json:"kind"`
 }
 
-func journalPath(dir string) string { return filepath.Join(dir, journalName) }
+// journalPath names one capture's record. The port makes it unique within a process, since two
+// captures cannot listen on the same one.
+func journalPath(dir string, pid, port int) string {
+	return filepath.Join(dir, journalDir, fmt.Sprintf("%d-%d.json", pid, port))
+}
 
 func writeJournal(dir string, j journal) error {
 	body, err := json.Marshal(j)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, journalDir), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(journalPath(dir), body, 0o600)
+	return os.WriteFile(journalPath(dir, j.PID, j.Port), body, 0o600)
 }
 
-func removeJournal(dir string) {
-	_ = os.Remove(journalPath(dir))
+// removeJournal drops one capture's record and leaves every other capture's alone.
+func removeJournal(dir string, pid, port int) {
+	_ = os.Remove(journalPath(dir, pid, port))
 }
 
-func readJournal(dir string) (journal, bool) {
-	body, err := os.ReadFile(journalPath(dir))
+// readJournals returns every record in the directory, newest first by file name.
+func readJournals(dir string) []journal {
+	entries, err := os.ReadDir(filepath.Join(dir, journalDir))
 	if err != nil {
-		return journal{}, false
+		return nil
 	}
-	var j journal
-	if err := json.Unmarshal(body, &j); err != nil {
-		return journal{}, false
+	var out []journal
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, journalDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var j journal
+		if err := json.Unmarshal(body, &j); err != nil {
+			continue
+		}
+		out = append(out, j)
 	}
-	return j, true
+	return out
 }
 
 // Leftover describes a capture that never cleaned up after itself.
@@ -109,21 +132,26 @@ func FindLeftover(dir string) Leftover {
 			return Leftover{}
 		}
 	}
-	j, ok := readJournal(dir)
-	if !ok {
-		return Leftover{}
+	for _, j := range readJournals(dir) {
+		// a record whose process is still running belongs to a live capture, which will clean up
+		// after itself
+		if j.PID > 0 && processAlive(j.PID) {
+			continue
+		}
+		l := Leftover{PID: j.PID, dir: dir, j: j}
+		if j.Service != "" && hostProxyStillSet(j) {
+			l.Machine = "this Mac's web proxy"
+		}
+		if j.Device != nil {
+			l.Device = j.Device.Name
+		}
+		if l.Found() {
+			return l
+		}
+		// nothing of this one is still in place, so its record is finished with
+		removeJournal(dir, j.PID, j.Port)
 	}
-	if j.PID > 0 && processAlive(j.PID) {
-		return Leftover{}
-	}
-	l := Leftover{PID: j.PID, dir: dir, j: j}
-	if j.Service != "" && hostProxyStillSet(j) {
-		l.Machine = "this Mac's web proxy"
-	}
-	if j.Device != nil {
-		l.Device = j.Device.Name
-	}
-	return l
+	return Leftover{}
 }
 
 // processAlive reports whether a pid is still running, so a live capture's journal is not undone.
@@ -155,6 +183,6 @@ func (l Leftover) Clean(ctx context.Context, clearDevice func(context.Context, d
 			errs = append(errs, fmt.Errorf("could not clear the proxy on %s: %w", d.Name, err))
 		}
 	}
-	removeJournal(l.dir)
+	removeJournal(l.dir, l.j.PID, l.j.Port)
 	return errors.Join(errs...)
 }

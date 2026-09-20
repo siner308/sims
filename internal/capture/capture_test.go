@@ -3,8 +3,6 @@ package capture_test
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -335,8 +333,8 @@ func TestNoteSurvivesAProcessThatNeverCleanedUp(t *testing.T) {
 	// deliberately no Stop: the session is abandoned exactly as a killed process abandons it
 
 	// from another run's point of view the note is there; only the live pid hides it
-	if _, err := os.Stat(filepath.Join(dir, "in-flight.json")); err != nil {
-		t.Fatalf("the capture left no note for a later run to act on: %v", err)
+	if n := len(capture.JournalsForTest(dir)); n != 1 {
+		t.Fatalf("the capture left %d notes for a later run to act on, want 1", n)
 	}
 }
 
@@ -385,5 +383,75 @@ func TestHostDeviceNeedsTheMachinesProxy(t *testing.T) {
 	emu := androidEmulator()
 	if capture.NeedsHostProxyForTest(emu) {
 		t.Error("an emulator has its own proxy setting and must not touch the machine's")
+	}
+}
+
+// Several captures run at once, and each one's record has to survive the others. With a single
+// shared journal the second capture to start erased the first one's, so a machine whose settings
+// the first capture had changed could not be put back after a kill.
+func TestEachCaptureKeepsItsOwnRecord(t *testing.T) {
+	dir := t.TempDir()
+	p := newFake()
+
+	first, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := capture.Start(t.Context(), p, secondEmulator(), capture.Options{CertDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { first.Stop(); second.Stop() })
+
+	records := capture.JournalsForTest(dir)
+	if len(records) != 2 {
+		t.Fatalf("two running captures left %d records, want one each", len(records))
+	}
+	devices := map[string]bool{}
+	for _, j := range records {
+		if j.Device != nil {
+			devices[j.Device.ID] = true
+		}
+	}
+	for _, want := range []string{"Pixel_7", "Pixel_9"} {
+		if !devices[want] {
+			t.Errorf("no record names %s: %v", want, devices)
+		}
+	}
+}
+
+// Stopping one capture must not delete another's record. The first capture to stop used to remove
+// the single shared journal, leaving every still-running capture unrecoverable.
+func TestStoppingOneCaptureLeavesTheOthersRecord(t *testing.T) {
+	dir := t.TempDir()
+	p := newFake()
+
+	staying, err := capture.Start(t.Context(), p, androidEmulator(), capture.Options{CertDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { staying.Stop() })
+	going, err := capture.Start(t.Context(), p, secondEmulator(), capture.Options{CertDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := going.Stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	records := capture.JournalsForTest(dir)
+	if len(records) != 1 {
+		t.Fatalf("after one stop there are %d records, want the running capture's alone", len(records))
+	}
+	if records[0].Device == nil || records[0].Device.ID != "Pixel_7" {
+		t.Errorf("the surviving record is %+v, want the still-running capture's", records[0].Device)
+	}
+}
+
+func secondEmulator() device.Device {
+	return device.Device{
+		ID: "Pixel_9", Name: "Pixel_9", Serial: "emulator-5556",
+		Platform: device.PlatformAndroid, Kind: device.KindVirtual,
+		Transport: device.TransportAVD, State: device.StateBooted,
 	}
 }

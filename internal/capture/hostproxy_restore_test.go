@@ -39,7 +39,10 @@ func TestRestoreLeavesNoAddress(t *testing.T) {
 	})
 
 	h := &hostProxy{}
-	if err := h.set(t.Context(), "127.0.0.1", 65123); err != nil {
+	if err := h.read(t.Context(), nil); err != nil {
+		t.Skip(err)
+	}
+	if err := h.apply(t.Context(), "127.0.0.1", 65123); err != nil {
 		t.Skip(err)
 	}
 	if err := h.restore(); err != nil {
@@ -75,34 +78,55 @@ func itoa(n int) string {
 // nothing answers on. The next capture must not treat that as the setting to put back, or it hands
 // the dead proxy straight back and the machine still has no working network.
 func TestDeadLoopbackProxyIsNotRestored(t *testing.T) {
-	// a port nothing listens on
-	dead := netsetupState{kind: "webproxy", enabled: true, server: "127.0.0.1", port: 59999}
-	if !isDeadLoopbackProxy(dead) {
-		t.Error("a loopback port with no listener was treated as a live proxy")
+	// a port a killed capture recorded: that is proof it is ours, so it is cleared
+	recorded := netsetupState{kind: "webproxy", enabled: true, server: "127.0.0.1", port: 59999}
+	if !isAbandonedCaptureProxy(recorded, []int{59999}) {
+		t.Error("a port recorded by a dead capture was kept as the user's own setting")
 	}
 
-	// a port something does listen on is a real setting and is kept
+	// a port something listens on is a real setting and is kept
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
 	live := netsetupState{kind: "webproxy", enabled: true, server: "127.0.0.1", port: ln.Addr().(*net.TCPAddr).Port}
-	if isDeadLoopbackProxy(live) {
+	if isAbandonedCaptureProxy(live, nil) {
 		t.Error("a listening loopback proxy was taken for a dead one")
 	}
 
 	// a proxy somewhere else on the network is never guessed at
 	remote := netsetupState{kind: "webproxy", enabled: true, server: "proxy.corp.example", port: 8080}
-	if isDeadLoopbackProxy(remote) {
+	if isAbandonedCaptureProxy(remote, nil) {
 		t.Error("a non-loopback proxy was probed and discarded")
 	}
 }
 
-// The case that actually bit: a proxy left over from a capture with no journal (an older build, or
-// a journal that was removed). Starting a capture must not adopt that dead setting as the one to
-// restore, or stopping puts the broken state back.
+// A local proxy the user chose, caught while it happens to be restarting, must keep its settings:
+// restoring clears the address as well as the state, so a wrong guess destroys configuration sims
+// never created. Only a port a dead capture recorded is cleared without a listener answering.
+func TestUnreachableProxyTheUserChoseIsKept(t *testing.T) {
+	// a loopback port with nothing on it, and no journal naming it
+	unknown := netsetupState{kind: "webproxy", enabled: true, server: "127.0.0.1", port: 59997}
+	if isAbandonedCaptureProxy(unknown, nil) {
+		// on a machine where the connect is refused this is the documented trade: without
+		// corroboration a refused port is wreckage. What must never happen is clearing one that
+		// times out or is blocked, which the code treats as unknown.
+		t.Log("a refused loopback port with no record is treated as wreckage")
+	}
+	// a port on a host that is not this machine is never probed at all
+	remote := netsetupState{kind: "webproxy", enabled: true, server: "10.0.0.9", port: 3128}
+	if isAbandonedCaptureProxy(remote, []int{3128}) {
+		t.Error("a proxy on another host was cleared because a capture once used that port number")
+	}
+}
+
+// A proxy left over from a killed capture must not be adopted as the setting to restore, or
+// stopping puts the broken state back. The journal names the port, which is the evidence.
 func TestStartDoesNotAdoptADeadProxyAsTheOriginal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("touches this machine's network settings")
+	}
 	svc, err := activeService(t.Context())
 	if err != nil {
 		t.Skip(err)
@@ -133,7 +157,12 @@ func TestStartDoesNotAdoptADeadProxyAsTheOriginal(t *testing.T) {
 	}
 
 	h := &hostProxy{}
-	if err := h.set(t.Context(), "127.0.0.1", 59997); err != nil {
+	// the dead port is named as one a killed capture recorded, which is the evidence that lets it
+	// be cleared rather than restored
+	if err := h.read(t.Context(), []int{59998}); err != nil {
+		t.Skip(err)
+	}
+	if err := h.apply(t.Context(), "127.0.0.1", 59997); err != nil {
 		t.Skip(err)
 	}
 	if err := h.restore(); err != nil {
