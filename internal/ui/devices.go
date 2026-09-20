@@ -291,6 +291,10 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.openApps()
 	case 'l':
 		if d, ok := v.selected(); ok {
+			if err := v.app.m.CanLog(v.app.ctx, d, nil); err != nil {
+				v.app.flashErr(err)
+				return nil
+			}
 			v.app.push(newLogsView(v.app, d, nil))
 		}
 	case 'n':

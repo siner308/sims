@@ -1,6 +1,7 @@
 package desktop_test
 
 import (
+	"context"
 	"encoding/pem"
 	"errors"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siner308/sims/internal/device"
 	"github.com/siner308/sims/internal/device/desktop"
@@ -329,4 +331,60 @@ func TestProcessesWithoutAnIdentifierEachGetARow(t *testing.T) {
 	if running < 50 {
 		t.Errorf("only %d running apps of %d survived the merge; rows are being lost", running, len(apps))
 	}
+}
+
+// A Mac's log can be filtered by process, the same way a simulator's is. Refusing to do it left the
+// user with an error where every other device gives them the app's own log.
+func TestHostLogCanBeNarrowedToAnApp(t *testing.T) {
+	p := provider(t)
+	d := device.Device{ID: desktop.ID, Kind: device.KindHost}
+	app := device.App{BundleID: "com.apple.finder", Name: "Finder", Process: "Finder"}
+
+	cmd, err := p.LogCmd(t.Context(), d, &app)
+	if err != nil {
+		t.Fatalf("an app-scoped log was refused: %v", err)
+	}
+	if cmd == nil {
+		t.Fatal("no command")
+	}
+	joined := strings.Join(cmd.Args, " ")
+	if !strings.Contains(joined, "--predicate") {
+		t.Errorf("the command does not narrow to the app: %s", joined)
+	}
+	for _, want := range []string{"Finder", "com.apple.finder"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the predicate is missing %q: %s", want, joined)
+		}
+	}
+}
+
+// The command has to be one the platform accepts, not merely one that looks right.
+func TestHostAppLogActuallyRuns(t *testing.T) {
+	p := provider(t)
+	d := device.Device{ID: desktop.ID, Kind: device.KindHost}
+	app := device.App{BundleID: "com.apple.finder", Name: "Finder", Process: "Finder"}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	cmd, err := p.LogCmd(ctx, d, &app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		t.Skipf("could not start the log stream: %v", err)
+	}
+	defer cmd.Process.Kill()
+
+	buf := make([]byte, 4096)
+	n, _ := out.Read(buf)
+	got := string(buf[:n])
+	if strings.Contains(got, "Invalid") || strings.Contains(got, "error:") {
+		t.Errorf("the platform rejected the predicate: %q", got)
+	}
+	t.Logf("first output: %q", strings.SplitN(got, "\n", 2)[0])
 }

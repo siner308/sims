@@ -155,17 +155,29 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case ev.Rune() == '/':
 		v.app.prompt("filter:", "", func(f string) { v.filter = f; v.render() })
 	case ev.Rune() == 'l':
-		if a, ok := v.selected(); ok {
-			v.app.push(newLogsView(v.app, v.dev, &a))
-		} else {
-			v.app.replaceTop(newLogsView(v.app, v.dev, nil))
-		}
+		v.openLogs()
 	case ev.Rune() == 't':
 		v.watchWithApp()
 	default:
 		return ev
 	}
 	return nil
+}
+
+// openLogs shows the selected app's log, or the device's when nothing is selected. Whether the
+// platform can narrow a log to one app is settled before the view opens: a screen that appears and
+// then reports it cannot do what it was opened for is worse than not opening.
+func (v *appsView) openLogs() {
+	a, ok := v.selected()
+	if !ok {
+		v.app.replaceTop(newLogsView(v.app, v.dev, nil))
+		return
+	}
+	if err := v.app.m.CanLog(v.app.ctx, v.dev, &a); err != nil {
+		v.app.flashErr(err)
+		return
+	}
+	v.app.push(newLogsView(v.app, v.dev, &a))
 }
 
 // watchWithApp opens this app's log with the device's traffic running through it. The log is the

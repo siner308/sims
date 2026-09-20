@@ -99,10 +99,7 @@ func (p *Provider) DeviceTypes(context.Context) ([]device.DeviceType, error) { r
 
 // LogCmd follows this machine's own system log.
 func (p *Provider) LogCmd(ctx context.Context, _ device.Device, app *device.App) (*exec.Cmd, error) {
-	if app != nil {
-		return nil, notSupported("filter its log by app on")
-	}
-	return hostLogCmd(ctx)
+	return hostLogCmd(ctx, app)
 }
 
 func (p *Provider) Info(ctx context.Context) [][2]string {

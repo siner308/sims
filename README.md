@@ -133,7 +133,8 @@ certificate is made once and kept, so the second capture on a device needs no se
 
 The machine sims runs on is in the list too, as a `desktop` device. `enter` opens what is running
 here and what is installed, with the process name that ties each app to a row in a capture, and
-`enter` there launches one. It boots nothing and installs nothing, and says so in a line when asked, but its traffic and its system log are the same two things sims
+`enter` there launches one. `l` on one of them follows that app's own log, the way it does for a
+simulator. It boots nothing and installs nothing, and says so in a line when asked, but its traffic and its system log are the same two things sims
 shows for everything else: `t` captures what the apps on this Mac are sending, with each row named
 by the process behind it. Trusting the certificate there is a command rather than part of starting a
 capture, because macOS puts up an authorisation panel: `sims proxy ca localhost --install`. Windows

@@ -2,8 +2,11 @@ package desktop
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/siner308/sims/internal/device"
 )
 
 func supported() bool { return true }
@@ -34,7 +37,15 @@ func hardwareModel(ctx context.Context) string {
 }
 
 // hostLogCmd streams this Mac's log in the same format the simulators use, so the merged view reads
-// their timestamps with the parser it already has. `log` is a zsh builtin, hence the full path.
-func hostLogCmd(ctx context.Context) (*exec.Cmd, error) {
-	return exec.CommandContext(ctx, "/usr/bin/log", "stream", "--style", "compact"), nil
+// their timestamps with the parser it already has. A non-nil app narrows it the same way a
+// simulator's log is narrowed. `log` is a zsh builtin, hence the full path.
+func hostLogCmd(ctx context.Context, app *device.App) (*exec.Cmd, error) {
+	args := []string{"stream", "--style", "compact"}
+	if app != nil {
+		// the logger names a process by its executable, which can differ from the display name; the
+		// subsystem is usually the bundle identifier, so either match counts
+		args = append(args, "--predicate",
+			fmt.Sprintf("process == %q OR subsystem == %q", app.ProcessName(), app.BundleID))
+	}
+	return exec.CommandContext(ctx, "/usr/bin/log", args...), nil
 }

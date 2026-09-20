@@ -51,6 +51,21 @@ func (c *captures) all() []*capture.Session {
 	return out
 }
 
+// CanLog reports whether a log stream can be opened for a device, and for one app in particular
+// when app is given. A front end asks before opening the view, since the alternative is a screen
+// that appears and then says it cannot do the thing it was opened for.
+func (m *Manager) CanLog(ctx context.Context, d device.Device, app *device.App) error {
+	cmd, err := m.LogCmd(ctx, d, app)
+	if err != nil {
+		return err
+	}
+	if cmd == nil {
+		return fmt.Errorf("%s has no log stream sims can follow", d.Name)
+	}
+	// the command was only built, never started; releasing it costs nothing
+	return nil
+}
+
 // CanCapture reports whether a device can be pointed at the proxy.
 func (m *Manager) CanCapture(d device.Device) bool {
 	p, err := m.provider(d)

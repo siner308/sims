@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+
+	"github.com/siner308/sims/internal/device"
 )
 
 // Linux is left out until its proxy side is written: listing the machine and then refusing to
@@ -18,6 +20,6 @@ func osVersion(context.Context) string { return "" }
 
 func hardwareModel(context.Context) string { return "" }
 
-func hostLogCmd(context.Context) (*exec.Cmd, error) {
+func hostLogCmd(context.Context, *device.App) (*exec.Cmd, error) {
 	return nil, errors.New("sims cannot follow this machine's log yet")
 }

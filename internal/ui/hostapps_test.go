@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"context"
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -74,4 +77,51 @@ func TestHostAppsOfferNoInstall(t *testing.T) {
 	if !strings.Contains(status, "does not install") {
 		t.Errorf("status = %q", status)
 	}
+}
+
+// A log the platform cannot open must be refused before the view appears. Opening a screen that
+// then says it cannot do what it was opened for leaves the user nowhere.
+func TestAnImpossibleAppLogIsRefusedBeforeOpening(t *testing.T) {
+	prov := &noAppLogProvider{fakeProvider: &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{emulator()}}}
+	a := New("test", sims.New(prov))
+	_, stop := runHeadless(t, a)
+	defer func() { a.m.StopAllCaptures(); stop() }()
+
+	var av *appsView
+	a.tv.QueueUpdate(func() {
+		av = newAppsView(a, emulator())
+		a.push(av)
+	})
+	waitFor(t, a, 5*time.Second, func() bool { return av != nil && len(av.apps) > 0 })
+	a.tv.QueueUpdate(func() { av.showSystem = true; av.render() })
+	waitFor(t, a, 5*time.Second, func() bool {
+		_, ok := av.selected()
+		return ok
+	})
+
+	a.tv.QueueUpdate(func() { a.setStatus(""); av.onKey(tcell.NewEventKey(tcell.KeyRune, 'l', tcell.ModNone)) })
+
+	var status string
+	waitFor(t, a, 5*time.Second, func() bool {
+		status = a.status.GetText(true)
+		return strings.TrimSpace(status) != ""
+	})
+	if !strings.Contains(status, "cannot") && !strings.Contains(status, "no log") {
+		t.Errorf("status = %q", status)
+	}
+	if _, opened := a.top().(*logsView); opened {
+		t.Error("the log view opened even though the platform cannot produce that log")
+	}
+}
+
+// noAppLogProvider refuses a log scoped to one app, the way a platform without the capability does.
+type noAppLogProvider struct {
+	*fakeProvider
+}
+
+func (p *noAppLogProvider) LogCmd(_ context.Context, _ device.Device, app *device.App) (*exec.Cmd, error) {
+	if app != nil {
+		return nil, errors.New("sims cannot filter its log by app here")
+	}
+	return exec.Command("true"), nil
 }
