@@ -174,13 +174,14 @@ func (v *logsView) watchTraffic() {
 	v.unwatchTraffic()
 	v.watchOff = make(chan struct{})
 	off, session := v.watchOff, v.session
+	// the session is read here and never again from the goroutine below: the view's own fields
+	// belong to the UI goroutine, and the callback runs there
+	store := session.Store
+	// subscribing before the goroutine starts: Changed reports the next change, not one already made
+	changed := store.Changed()
 	go func() {
-		// the session is read here and never again from this goroutine: the view's own fields belong
-		// to the UI goroutine, and the callback below runs there
-		store := session.Store
 		tick := time.NewTicker(redrawInterval)
 		defer tick.Stop()
-		changed := store.Changed()
 		dirty := true
 		for {
 			select {

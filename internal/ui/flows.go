@@ -82,19 +82,21 @@ func (v *flowsView) Refresh() {
 // watch redraws on a timer while the store reports changes, instead of once per flow.
 func (v *flowsView) watch() {
 	v.stop = make(chan struct{})
-	stop := v.stop
+	stop, store := v.stop, v.session.Store
+	// Changed reports the next change, not one already made, so a flow recorded between the caller's
+	// reload and this goroutine starting would go unseen until some later flow woke it up.
+	changed := store.Changed()
 	go func() {
 		tick := time.NewTicker(redrawInterval)
 		defer tick.Stop()
-		dirty := false
-		changed := v.session.Store.Changed()
+		dirty := true
 		for {
 			select {
 			case <-stop:
 				return
 			case <-changed:
 				dirty = true
-				changed = v.session.Store.Changed()
+				changed = store.Changed()
 			case <-tick.C:
 				if !dirty {
 					continue
