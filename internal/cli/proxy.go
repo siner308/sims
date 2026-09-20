@@ -100,10 +100,10 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 	}
 	fmt.Fprintln(c.Err, "   press ctrl+c to stop and put everything back")
 
+	// the store calls this from one goroutine per proxied connection, so the writer is shared:
+	// without a lock the lines interleave and whole records are lost
+	w := &flowWriter{out: c.Out, json: c.json}
 	if !o.quiet {
-		// the store calls this from one goroutine per proxied connection, so the writer is shared:
-		// without a lock the lines interleave and whole records are lost
-		w := &flowWriter{out: c.Out, json: c.json}
 		session.Store.OnDone(w.write)
 	}
 
@@ -137,6 +137,11 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 			return err
 		}
 		fmt.Fprintf(c.Err, "wrote %s\n", o.harPath)
+	}
+	// a pipe that closed part way through, `| head` being the usual one, stops the output after the
+	// first failure; exiting 0 there would say everything was written
+	if err := w.Err(); err != nil {
+		return fmt.Errorf("the flow output was cut short: %w", err)
 	}
 	return nil
 }

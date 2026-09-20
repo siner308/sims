@@ -158,3 +158,59 @@ func TestProfileEscapesEveryInterpolatedValue(t *testing.T) {
 		t.Fatalf("a host with & and <> produced an invalid plist: %v %s\n%s", err, out, body)
 	}
 }
+
+// A certificate-only profile must carry no proxy payload. The cert-install command asks for one,
+// and a phone handed a manual proxy pointing at nothing has no working network, with no undo since
+// the command does not remove what it installed.
+func TestCertificateOnlyProfileCarriesNoProxy(t *testing.T) {
+	path, cleanup, err := writeProfile(device.ProxyTarget{
+		CACertDER: []byte{1, 2, 3}, CertName: "sims proxy CA",
+		// no host, no port, and no wifi name: the cert-install command passes exactly this
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint: %v %s\n%s", err, out, body)
+	}
+	text := string(body)
+	for _, unwanted := range []string{"com.apple.wifi.managed", "ProxyServer", "ProxyType", "SSID_STR"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("a certificate-only profile carries %q:\n%s", unwanted, text)
+		}
+	}
+	if strings.Contains(text, ":0") {
+		t.Errorf("the profile describes an address of :0:\n%s", text)
+	}
+	if !strings.Contains(text, "com.apple.security.root") {
+		t.Error("the certificate payload is missing")
+	}
+}
+
+// A capture's profile still carries both payloads.
+func TestCaptureProfileCarriesTheProxy(t *testing.T) {
+	path, cleanup, err := writeProfile(device.ProxyTarget{
+		Host: "192.168.1.20", Port: 9090,
+		CACertDER: []byte{1, 2, 3}, CertName: "sims proxy CA", SSID: "Home",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	body, _ := os.ReadFile(path)
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint: %v %s", err, out)
+	}
+	for _, want := range []string{"com.apple.wifi.managed", "192.168.1.20", "9090", "Home"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("a capture profile is missing %q", want)
+		}
+	}
+}

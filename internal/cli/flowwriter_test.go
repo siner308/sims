@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -60,3 +61,21 @@ func TestFlowWriterLinesStayWhole(t *testing.T) {
 		}
 	}
 }
+
+// A pipe that closes part way through, `| head` being the usual one, stops the output after the
+// first failure. Reporting success there tells a caller everything was written.
+func TestFlowWriterKeepsTheFirstFailure(t *testing.T) {
+	w := &flowWriter{out: failingWriter{}, json: true}
+	for range 5 {
+		w.write(proxy.Flow{Method: "GET", URL: "https://example.com/"})
+	}
+	if w.Err() == nil {
+		t.Error("a failed write was not reported")
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errBrokenPipe }
+
+var errBrokenPipe = errors.New("broken pipe")

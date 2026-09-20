@@ -381,7 +381,8 @@ func (a *App) startCapture(d device.Device, scope capture.Scope, then func(*capt
 		session, err = a.m.StartCapture(a.ctx, d, capture.Options{SSID: currentSSID(a.ctx), Scope: scope})
 		return err
 	}, func() {
-		a.setStatus("")
+		// the capture started, so an older message has nothing to say about it
+		a.clearStatus()
 		if manual := manualSteps(session.Steps); manual != "" {
 			a.confirm("capturing "+d.Name+", but it needs you first:\n\n"+manual, func() { then(session) })
 			return

@@ -67,8 +67,14 @@ func (p *Provider) installProfile(ctx context.Context, d device.Device, t device
 	if err := devicectl(ctx, "device", "profile", "install", "--device", d.ID, path); err != nil {
 		return nil, err
 	}
+	// a certificate-only profile carries no proxy payload, so it must not promise to send traffic
+	// anywhere: a phone told to use a proxy at nothing has no working network
+	sent := "sent to the phone; it carries the certificate and points traffic at " + t.Addr()
+	if t.CertOnly() {
+		sent = "sent to the phone; it carries the certificate and changes no network setting"
+	}
 	return []device.ProxyStep{
-		{Title: "profile", Detail: "sent to the phone; it carries the certificate and points traffic at " + t.Addr()},
+		{Title: "profile", Detail: sent},
 		{Title: "approve it", Detail: "on the phone: Settings > General > VPN & Device Management > sims proxy > Install", Manual: true},
 		{Title: "trust the certificate", Detail: "then Settings > General > About > Certificate Trust Settings, and switch " + t.CertName + " on", Manual: true},
 	}, nil
@@ -118,7 +124,7 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
   <key>PayloadDisplayName</key><string>sims proxy</string>
-  <key>PayloadDescription</key><string>Sends this device's web traffic to sims on {{.Addr}} and trusts its certificate.</string>
+  <key>PayloadDescription</key><string>{{if .CertOnly}}Trusts the certificate sims signs with.{{else}}Sends this device's web traffic to sims on {{.Addr}} and trusts its certificate.{{end}}</string>
   <key>PayloadIdentifier</key><string>{{.Identifier}}</string>
   <key>PayloadType</key><string>Configuration</string>
   <key>PayloadUUID</key><string>{{.ProfileUUID}}</string>
@@ -136,7 +142,7 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
       <key>PayloadContent</key>
       <data>{{.CertBase64}}</data>
     </dict>
-    <dict>
+    {{if not .CertOnly}}<dict>
       <key>PayloadType</key><string>com.apple.wifi.managed</string>
       <key>PayloadIdentifier</key><string>{{.Identifier}}.wifi</string>
       <key>PayloadUUID</key><string>{{.WiFiUUID}}</string>
@@ -147,13 +153,15 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
       <key>ProxyType</key><string>Manual</string>
       <key>ProxyServer</key><string>{{.Host}}</string>
       <key>ProxyServerPort</key><integer>{{.Port}}</integer>
-    </dict>
+    </dict>{{end}}
   </array>
 </dict>
 </plist>
 `
 
 type profileData struct {
+	// CertOnly leaves the proxy payload out: the profile then only adds a trusted root.
+	CertOnly    bool
 	Identifier  string
 	ProfileUUID string
 	CertUUID    string
@@ -180,7 +188,9 @@ func writeProfile(t device.ProxyTarget) (string, func(), error) {
 // devicectl refuses an unsigned profile: it reads one as a provisioning profile and reports
 // "The provisioning profile CMS/PKCS#7 envelope is invalid".
 func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), error) {
-	if t.SSID == "" {
+	// the wifi name scopes the proxy payload; a certificate-only profile has no proxy payload and
+	// so needs no network to attach it to
+	if t.SSID == "" && !t.CertOnly() {
 		return "", nil, errors.New("a phone takes its proxy from the wifi network it is on, and this Mac is not on one; " +
 			"join the phone's wifi network, or use sims proxy ca <phone> --install and set the proxy on the phone by hand")
 	}
@@ -195,6 +205,7 @@ func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), erro
 		return strings.ToUpper(h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]), nil
 	}
 	data := profileData{
+		CertOnly:   t.CertOnly(),
 		Identifier: profileIdentifier,
 		CertName:   xmlEscape(t.CertName),
 		CertBase64: base64.StdEncoding.EncodeToString(t.CACertDER),

@@ -80,20 +80,40 @@ func runHeadless(t *testing.T, a *App) (tcell.SimulationScreen, func()) {
 // onUI runs fn on the tview goroutine; widget reads from the test goroutine race with Draw.
 func onUI(a *App, fn func()) { a.tv.QueueUpdate(fn) }
 
+// waitFor polls a condition on the UI goroutine. It waits for each poll to actually run: reading
+// the result straight after queueing races the queue, and under load the UI goroutine can stay
+// behind for longer than the whole budget, so a condition that became true early is never seen.
 func waitFor(t *testing.T, a *App, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		ok := false
-		a.tv.QueueUpdate(func() { ok = cond() })
-		if ok {
+		if onUIResult(a, cond, time.Until(deadline)) {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	var status string
-	a.tv.QueueUpdate(func() { status = a.status.GetText(true) })
+	status := "unknown"
+	onUIResult(a, func() bool {
+		status = a.status.GetText(true)
+		return true
+	}, time.Second)
 	t.Fatalf("condition not met within %s; status=%q", timeout, status)
+}
+
+// onUIResult runs fn on the UI goroutine and returns what it reported, or false if it did not get
+// to run inside the budget.
+func onUIResult(a *App, fn func() bool, budget time.Duration) bool {
+	if budget <= 0 {
+		return false
+	}
+	result := make(chan bool, 1)
+	a.tv.QueueUpdate(func() { result <- fn() })
+	select {
+	case ok := <-result:
+		return ok
+	case <-time.After(budget):
+		return false
+	}
 }
 
 func TestApp_DevicesRender(t *testing.T) {

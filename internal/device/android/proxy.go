@@ -40,13 +40,13 @@ func (p *Provider) SetProxy(ctx context.Context, d device.Device, t device.Proxy
 		return nil, errors.New("device is not running")
 	}
 	// a cert-only call: the caller wants the certificate trusted and nothing pointed anywhere
-	if t.Port != 0 {
+	if !t.CertOnly() {
 		if err := p.putProxy(ctx, d, t.Addr()); err != nil {
 			return nil, err
 		}
 	}
 	steps := []device.ProxyStep{{Title: "proxy", Detail: "traffic goes to " + t.Addr()}}
-	if t.Port == 0 {
+	if t.CertOnly() {
 		steps = nil
 	}
 	if len(t.CACert) == 0 {

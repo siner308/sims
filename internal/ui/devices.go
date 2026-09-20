@@ -352,7 +352,8 @@ func (v *devicesView) openApps() {
 			booted, err = v.app.m.WaitBooted(v.app.ctx, d, sims.BootTimeout)
 			return err
 		}, func() {
-			v.app.setStatus("")
+			// the device booted; whatever was on the line before is no longer the news
+			v.app.clearStatus()
 			v.Refresh()
 			v.app.push(newAppsView(v.app, booted))
 		})

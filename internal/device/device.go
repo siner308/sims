@@ -323,6 +323,11 @@ type ProfileSigner interface {
 
 func (t ProxyTarget) Addr() string { return fmt.Sprintf("%s:%d", t.Host, t.Port) }
 
+// CertOnly reports whether the caller wants the certificate trusted and nothing pointed anywhere.
+// A provider must not change a network setting for one of these: a device told to use a proxy that
+// does not exist has no working network.
+func (t ProxyTarget) CertOnly() bool { return t.Port == 0 }
+
 // ProxyStep is one thing that has to happen on the device, and whether sims did it.
 type ProxyStep struct {
 	Title string `json:"title"`
