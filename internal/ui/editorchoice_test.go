@@ -115,7 +115,11 @@ func TestShiftEAsksAgain(t *testing.T) {
 		t.Error("e asked again even though an editor was already chosen")
 	}
 
-	// shift+e opens the chooser so a different one can be picked
+	// shift+e opens the chooser so a different one can be picked, which needs the machine to have
+	// something registered to open a file; a build machine with no desktop has nothing to list
+	if !hasDesktop() {
+		t.Skip("no desktop on this machine, so the chooser would have nothing to show")
+	}
 	a.tv.QueueUpdate(func() { a.chooseEditor(sample, true) })
 	waitFor(t, a, 5*time.Second, func() bool {
 		_, open := a.top().(*editorChoiceView)

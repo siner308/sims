@@ -205,8 +205,12 @@ func TestCaptureProfileCarriesTheProxy(t *testing.T) {
 	defer cleanup()
 
 	body, _ := os.ReadFile(path)
-	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
-		t.Fatalf("plutil -lint: %v %s", err, out)
+	// plutil is the authority on whether this is a plist a phone will accept, and it only exists on
+	// macOS; elsewhere the checks below on the content still run
+	if _, err := exec.LookPath("plutil"); err == nil {
+		if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+			t.Fatalf("plutil -lint: %v %s", err, out)
+		}
 	}
 	for _, want := range []string{"com.apple.wifi.managed", "192.168.1.20", "9090", "Home"} {
 		if !strings.Contains(string(body), want) {

@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -300,6 +301,9 @@ func trustAnything(s *proxy.Server) {
 // The attribution in the flows table depends on this working for a live connection; if it cannot
 // name the process, every row says "-" and the device filter has nothing to separate.
 func TestLookupProcessNamesThisTest(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("process lookup is only implemented on macOS, and the capture says so rather than guessing")
+	}
 	var seen string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")

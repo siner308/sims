@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,15 @@ func TestScratchFileHoldsTheExchange(t *testing.T) {
 	}
 }
 
+// hasDesktop reports whether this machine runs a desktop that registers applications against file
+// types. A container has none, and asking it what opens a text file correctly answers nothing.
+func hasDesktop() bool {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		return true
+	}
+	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+}
+
 // The editors offered come from the system, so an editor installed under any name is there and one
 // that is not installed never is. A hardcoded list would have shown neither correctly.
 func TestEditorsComeFromTheSystem(t *testing.T) {
@@ -98,10 +108,14 @@ func TestEditorsComeFromTheSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := guiEditors(sample)
-	// every desktop registers something for a text file, so an empty list means the query itself
-	// broke rather than that the machine has nothing: skipping here hid exactly that
+	// a desktop always registers something for a text file, so an empty list there means the query
+	// broke rather than that nothing is installed. A build machine has no desktop at all, and the
+	// right answer for it is an empty chooser rather than a failure.
 	if len(found) == 0 {
-		t.Fatal("no editors came back; the query for what opens a text file failed")
+		if hasDesktop() {
+			t.Fatal("no editors came back; the query for what opens a text file failed")
+		}
+		t.Skip("no desktop on this machine, so nothing is registered to open a file")
 	}
 	for _, e := range found {
 		if e.Name == "" {
