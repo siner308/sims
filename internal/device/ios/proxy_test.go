@@ -11,6 +11,32 @@ import (
 	"github.com/siner308/sims/internal/proxy"
 )
 
+// plutil is Apple's own check that a file is a plist a phone will accept, and it exists only on
+// macOS. Where it is missing the profile's content is still checked; what cannot be verified is
+// skipped rather than reported as a defect in the profile.
+func lintPlist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := exec.LookPath("plutil"); err != nil {
+		t.Skip("plutil is only on macOS, and it is what says whether this parses as a plist")
+	}
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint: %v %s", err, out)
+	}
+}
+
+// printPlist is plutil's own rendering of the file, used to read values back the way iOS would.
+func printPlist(t *testing.T, path string) string {
+	t.Helper()
+	if _, err := exec.LookPath("plutil"); err != nil {
+		t.Skip("plutil is only on macOS, and it is what reads the profile back")
+	}
+	out, err := exec.Command("plutil", "-p", path).Output()
+	if err != nil {
+		t.Fatalf("plutil -p: %v", err)
+	}
+	return string(out)
+}
+
 // The profile is a plist Apple's own tooling has to accept; plutil is the check that catches a
 // malformed one here rather than on the phone.
 func TestProfileIsValidPlist(t *testing.T) {
@@ -27,17 +53,8 @@ func TestProfileIsValidPlist(t *testing.T) {
 	}
 	defer cleanup()
 
-	out, err := exec.Command("plutil", "-lint", path).CombinedOutput()
-	if err != nil {
-		body, _ := os.ReadFile(path)
-		t.Fatalf("plutil -lint: %v %s\n%s", err, out, body)
-	}
-
-	printed, err := exec.Command("plutil", "-p", path).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(printed)
+	lintPlist(t, path)
+	text := printPlist(t, path)
 	for _, want := range []string{"192.168.1.20", "9090", "Home Wifi", "com.apple.security.root", "dev.sims.proxy"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("profile is missing %q:\n%s", want, text)
@@ -67,15 +84,9 @@ func TestProfileEscapesTheWifiName(t *testing.T) {
 	}
 	defer cleanup()
 
-	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
-		body, _ := os.ReadFile(path)
-		t.Fatalf("a wifi name with & and <> produced an invalid plist: %v %s\n%s", err, out, body)
-	}
-	printed, err := exec.Command("plutil", "-p", path).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(printed), "Joe & Ann's <Home>") {
+	lintPlist(t, path)
+	printed := printPlist(t, path)
+	if !strings.Contains(printed, "Joe & Ann's <Home>") {
 		t.Errorf("the wifi name did not survive the round trip:\n%s", printed)
 	}
 }
@@ -153,10 +164,7 @@ func TestProfileEscapesEveryInterpolatedValue(t *testing.T) {
 	}
 	defer cleanup()
 
-	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
-		body, _ := os.ReadFile(path)
-		t.Fatalf("a host with & and <> produced an invalid plist: %v %s\n%s", err, out, body)
-	}
+	lintPlist(t, path)
 }
 
 // A certificate-only profile must carry no proxy payload. The cert-install command asks for one,
@@ -176,9 +184,7 @@ func TestCertificateOnlyProfileCarriesNoProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
-		t.Fatalf("plutil -lint: %v %s\n%s", err, out, body)
-	}
+	lintPlist(t, path)
 	text := string(body)
 	for _, unwanted := range []string{"com.apple.wifi.managed", "ProxyServer", "ProxyType", "SSID_STR"} {
 		if strings.Contains(text, unwanted) {
@@ -205,13 +211,7 @@ func TestCaptureProfileCarriesTheProxy(t *testing.T) {
 	defer cleanup()
 
 	body, _ := os.ReadFile(path)
-	// plutil is the authority on whether this is a plist a phone will accept, and it only exists on
-	// macOS; elsewhere the checks below on the content still run
-	if _, err := exec.LookPath("plutil"); err == nil {
-		if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
-			t.Fatalf("plutil -lint: %v %s", err, out)
-		}
-	}
+	lintPlist(t, path)
 	for _, want := range []string{"com.apple.wifi.managed", "192.168.1.20", "9090", "Home"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("a capture profile is missing %q", want)
