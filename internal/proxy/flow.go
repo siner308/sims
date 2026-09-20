@@ -61,6 +61,9 @@ type Flow struct {
 	RespTruncated bool  `json:"responseTruncated,omitempty"`
 
 	Error string `json:"error,omitempty"`
+	// Abandoned is set when the client closed the connection before the response finished. The app
+	// got what it asked for and stopped, so this is not an error, but the body here is short.
+	Abandoned bool `json:"abandoned,omitempty"`
 }
 
 // MarshalJSON adds the bodies, which the struct holds as raw wire bytes. Text is written as a
@@ -170,9 +173,10 @@ func (s *Store) dropBodiesIfOver() {
 const DefaultMaxFlows = 2000
 
 // maxStoredBodyBytes bounds what the store keeps in bodies. Capping the number of flows alone lets
-// 2000 exchanges of a megabyte each hold gigabytes, which on a long capture of an app that moves
-// images or video takes the whole TUI down with it.
-const maxStoredBodyBytes = 256 << 20
+// a long capture of an app that moves images or video hold gigabytes and take the TUI down with it.
+// It has to stay well clear of the per-body cap, or a handful of large responses would evict each
+// other and the bodies a reader just captured would be gone before they opened them.
+const maxStoredBodyBytes = 1 << 30
 
 func NewStore(maxFlows int) *Store {
 	if maxFlows <= 0 {

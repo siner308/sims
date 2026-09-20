@@ -235,6 +235,7 @@ func outcomeCell(f proxy.Flow) string {
 	if f.Error != "" {
 		return "[red]err[-]"
 	}
+	// a client that stopped reading still got the status it asked for, so the status is what shows
 	return statusCell(f)
 }
 
@@ -244,6 +245,12 @@ func sizeAndTiming(f proxy.Flow) string {
 	if !f.Done || f.Error != "" {
 		// nothing measured yet, or nothing to measure: the column still has to hold its place
 		return fmt.Sprintf("[gray]%*s[-]", sizeWidth+timingWidth+1, "")
+	}
+	if f.Abandoned {
+		// the size is what arrived before the client stopped reading, not the whole response
+		return fmt.Sprintf("[gray]%*s %*s[-]",
+			sizeWidth, proxy.SizeString(f.RespSize)+"+",
+			timingWidth, fmt.Sprintf("%dms", f.Duration.Milliseconds()))
 	}
 	return fmt.Sprintf("[gray]%*s %*s[-]",
 		sizeWidth, proxy.SizeString(f.RespSize),
@@ -274,6 +281,9 @@ const (
 // and the reason a failed exchange has no size or timing to show.
 func trailingNote(f proxy.Flow) string {
 	note := senderNote(f)
+	if f.Abandoned {
+		note = "  [yellow]client closed early[-]" + note
+	}
 	if f.Error != "" {
 		note = "  [red]" + tview.Escape(f.Error) + "[-]" + note
 	}

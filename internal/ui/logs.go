@@ -37,6 +37,8 @@ type logsView struct {
 	filter string
 	paused bool
 	nowrap bool
+	// noFollow stops the view jumping to the end as lines arrive, even while it is sitting there.
+	noFollow bool
 	// waiting is set while the runner shows in the status bar; only the UI goroutine touches it
 	waiting bool
 
@@ -100,17 +102,28 @@ func (v *logsView) pageKey() string { return "logs" }
 func (v *logsView) Primitive() tview.Primitive { return v.text }
 
 func (v *logsView) Hints() []hint {
-	hints := []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"}}
+	hints := []hint{
+		{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"f", v.followHint()}, {"w", "toggle wrap"},
+		{"g", "top"}, {"shift+g", "bottom"},
+	}
 	layers := []hint{{"t", v.layerHint(v.mixing(), "traffic")}, {"l", v.layerHint(v.showingLog(), "log")}}
 	if !v.mixing() {
 		return append(append(hints, groupBreak), layers...)
 	}
 	return append(append(hints, groupBreak,
 		hint{"up/down", "step exchanges"}, hint{"o", "open headers, then body"},
-		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"e", "open in an editor"},
-		hint{"shift+e", "pick another editor"},
+		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"v", "open the body"},
+		hint{"e", "open in an editor"}, hint{"shift+e", "pick another editor"},
 		groupBreak),
 		append(layers, hint{"ctrl+k", "stop capture"})...)
+}
+
+// followHint says what f does next rather than what the view is doing, the way the layer keys do.
+func (v *logsView) followHint() string {
+	if v.noFollow {
+		return "follow new lines"
+	}
+	return "hold the view still"
 }
 
 func (v *logsView) layerHint(on bool, what string) string {
@@ -547,7 +560,7 @@ func (v *logsView) append(chunk []string) {
 func (v *logsView) redraw() {
 	row, _ := v.text.GetScrollOffset()
 	_, _, _, height := v.text.GetInnerRect()
-	atEnd := row+height >= v.text.GetOriginalLineCount()
+	atEnd := !v.noFollow && row+height >= v.text.GetOriginalLineCount()
 	v.text.Clear()
 	if v.mixing() {
 		for _, e := range v.visibleEntries() {
@@ -587,6 +600,9 @@ func (v *logsView) redraw() {
 	}
 	if v.paused {
 		title += "[paused] "
+	}
+	if v.noFollow {
+		title += "[held] "
 	}
 	if v.nowrap {
 		title += "[nowrap] "
@@ -631,6 +647,16 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case 'p':
 		v.paused = !v.paused
 		v.redraw()
+	case 'f':
+		v.noFollow = !v.noFollow
+		if !v.noFollow {
+			v.text.ScrollToEnd()
+		}
+		v.redraw()
+	case 'v':
+		if v.mixing() {
+			v.viewBody()
+		}
 	case 'w':
 		v.nowrap = !v.nowrap
 		v.text.SetWrap(!v.nowrap)

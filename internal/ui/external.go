@@ -125,6 +125,9 @@ func exchangeText(f proxy.Flow) string {
 	if f.Error != "" {
 		fmt.Fprintf(&b, "error    %s\n", f.Error)
 	}
+	if f.Abandoned {
+		fmt.Fprintf(&b, "note     the client closed the connection before the response finished, so the body below stops where it stopped reading\n")
+	}
 
 	writeHalf(&b, "REQUEST", f.ReqHeader, f.ReqBody, f.ReqSize, f.ReqTruncated)
 	if f.Kind == proxy.KindTunnel {

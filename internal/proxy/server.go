@@ -21,7 +21,11 @@ import (
 const AttributeBudget = 400 * time.Millisecond
 
 const (
-	DefaultMaxBody   = 1 << 20
+	// DefaultMaxBody is what is kept of each body for reading later. It is generous because the
+	// point of a capture is to look at what went past, and a response too big to keep is exactly
+	// the one worth having: an image, a video or a bundle. The store's own ceiling still bounds
+	// total memory, and nothing here limits what reaches the client either way.
+	DefaultMaxBody   = 100 << 20
 	handshakeTimeout = 15 * time.Second
 	// peekTimeout bounds how long a CONNECT waits for the client's first byte before it is tunnelled
 	// as is: a client that expects the server to speak first would otherwise hang.
@@ -369,7 +373,11 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, scheme string) 
 		f.RespHeader = resp.Header.Clone()
 		f.ReqBody, f.ReqSize, f.ReqTruncated = reqCap.buf, reqCap.n, reqCap.truncated
 		f.RespBody, f.RespSize, f.RespTruncated = respCap.buf, respCap.n, respCap.truncated
-		if copyErr != nil {
+		switch {
+		case copyErr == nil:
+		case clientHungUp(ctx, copyErr):
+			f.Abandoned = true
+		default:
 			f.Error = "response cut short: " + copyErr.Error()
 		}
 	})
@@ -379,6 +387,14 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, scheme string) 
 		// connection is what the client would have seen without a proxy in the way.
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// clientHungUp reports that the copy stopped because the client went away rather than because
+// anything went wrong. A browser that has seen enough of an image, a player that closes a stream and
+// a cancelled fetch all end this way, and calling that an error puts a red row next to a response
+// the app got exactly as much of as it wanted.
+func clientHungUp(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && errors.Is(err, context.Canceled)
 }
 
 // flushWriter pushes each chunk to the client as it arrives so streamed responses stay live.
