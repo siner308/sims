@@ -22,6 +22,9 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          # the tag message says what the release is for. Only the CLI takes a header, and only as a
+          # file, so the config cannot carry it: without this the notes are a list of commits and a
+          # reader has to infer the point from thirty subject lines.
+          args: release --clean --release-header-tmpl .github/release-header.md.tmpl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
