@@ -121,10 +121,11 @@ Live `logcat` or `log stream` with a substring filter, pause, clear, and a wrap 
 
 ### Traffic
 
-Press `t` on a device and sims becomes the proxy it talks to: requests appear as they finish, with
-method, status, host, path, size and how long each took. `enter` opens one in full, with headers and
-a pretty-printed body, `/` filters, `s` writes a HAR file that Proxyman, Charles or the browser dev
-tools can read, and `ctrl+k` stops the capture and puts every setting back.
+Press `t` on a device and sims becomes the proxy it talks to. An exchange is one line, carrying its
+status, size, timing, method and url, and it fills in as the response arrives. `enter` opens one in
+full, with headers and a pretty-printed body, `/` filters, `s` writes a HAR file that Proxyman,
+Charles or the browser dev tools can read, and `ctrl+k` stops the capture and puts every setting
+back.
 
 Opening HTTPS needs the device to trust a certificate sims signs with, and sims installs it as part
 of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb push` into the
@@ -134,11 +135,12 @@ certificate is made once and kept, so the second capture on a device needs no se
 The machine sims runs on is in the list too, as a `desktop` device. `enter` opens what is running
 here and what is installed, with the process name that ties each app to a row in a capture, and
 `enter` there launches one. `l` on one of them follows that app's own log, the way it does for a
-simulator. It boots nothing and installs nothing, and says so in a line when asked, but its traffic and its system log are the same two things sims
-shows for everything else: `t` captures what the apps on this Mac are sending, with each row named
+simulator. It boots nothing and installs nothing, and says so in a line when asked, but its traffic
+and its system log are the same two things sims shows for everything else: `t` captures what the apps on this Mac are sending, with each row named
 by the process behind it. Trusting the certificate there is a command rather than part of starting a
-capture, because macOS puts up an authorisation panel: `sims proxy ca localhost --install`. Windows
-lists the same way and trusts through `certutil -user`.
+capture, because macOS puts up an authorisation panel: `sims proxy ca localhost --install`. The
+capture reads the keychain and only asks when the root is missing, so a machine already set up is
+not sent to run it again. Windows lists the same way and trusts through `certutil -user`.
 
 A capture puts every setting back when it stops, including on ctrl+c or a SIGTERM. When it cannot,
 because it was killed outright or the machine lost power, the record it wrote before changing
@@ -165,24 +167,28 @@ keeps the place it arrived in. The last remaining layer stays on, since an empty
 nothing. `shift+t` on a device opens the same capture as a table instead, which groups by domain and
 sorts. `ctrl+k` stops the capture and leaves the log running.
 
-From the apps view, `t` opens the selected app's log with the device's traffic beside it. The two
-halves have different scopes and the screen says so: the log is that app's, the traffic is
-everything the device sends. A device's connections do not carry the app that opened them, so a
-request is never labelled with the app whose log is on screen. Where sims can see the sender, on a
+From the apps view, `t` opens the device's traffic and remembers which app was selected, so `l`
+there adds that app's log rather than the whole device's. The two layers have different scopes and
+the screen says so: the log is that app's, the traffic is everything the device sends. A device's
+connections do not carry the app that opened them, so a request is never labelled with the app whose
+log is on screen. Where sims can see the sender, on a
 simulator or on this machine, the row carries its process name.
 
-In that stream `n` and `shift+n` step between exchanges and `o` opens the one selected, in place:
-once for its headers, again for its body, a third time to fold it away. `shift+o` opens every
-exchange at once, for reading a whole conversation. The request and the response open separately,
-because each carries its own headers.
+In that stream the arrows step between exchanges, and the newest is selected as it arrives so a key
+always has something to act on. `o` opens the one selected in place: once for its headers, again for
+its body, a third time to fold it away. `shift+o` opens every exchange at once, for reading a whole
+conversation. `f` holds the view still, for reading something while requests keep landing.
 
-A long body is easier read somewhere with search and folding, so `enter` hands the whole exchange to
-`$PAGER` and `e` to `$EDITOR`, as plain text. sims steps out of the terminal while the tool has it
-and takes it back when the tool exits.
+`enter` opens the exchange on a page of its own, which `esc` closes: `/` finds, `n` and `shift+n`
+step the matches. `enter` there hands the same text to `$PAGER`. `e` opens it in a windowed editor,
+chosen the first time from what this machine has registered to open a file and remembered after
+that, with `shift+e` to pick another. `v` opens the response body in whatever opens that kind of
+file, so an image or a video is something to look at rather than a byte count.
 
 ```
 12:04:01.220  I/MyApp  ( 1234): tapped sign in
-12:04:01.244  → POST https://api.example.com/v1/login
+12:04:01.244  200     66 B   146ms POST    https://api.example.com/v1/login
+              REQUEST
               Authorization: Bearer eyJhbGciOiJIUzI1NiJ9
               Content-Type: application/json
               body 43 B
@@ -190,7 +196,7 @@ and takes it back when the tool exits.
                 "email": "kim@example.com",
                 "remember": true
               }
-12:04:01.390  ← 200 66 B 146ms
+              RESPONSE
               Cache-Control: no-store
               body 66 B
               {
@@ -307,10 +313,11 @@ sims skill > SKILL.md                   # for any other agent
 | devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
 | devices | `t` / `shift+t` | the device's traffic as a stream, which `l` adds its log to / the same capture as a table |
-| proxy | `enter` `e` `/` `c` `p` `d` `s` | read an exchange in `$PAGER`, open it in `$EDITOR`, filter, clear, pause, hide this machine's own apps, save a HAR file |
+| proxy | `enter` `v` `e` `shift+e` | read an exchange on its own page (`esc` closes it, `enter` there sends the text to `$PAGER`) / open the response body in whatever opens that kind of file / open the exchange in a windowed editor / pick a different editor |
+| proxy | `/` `c` `p` `d` `s` | filter, clear, pause, hide this machine's own apps, save a HAR file |
 | proxy | `g` / `space` / `shift+g` | group by domain (`enter` on a heading folds it) / fold one domain / fold or unfold every domain |
 | proxy | `ctrl+k` / `esc` | stop the capture and restore every setting / leave the view with the capture running |
-| flow | `tab` / `shift+tab` | overview, request, response |
+| stream | `up` / `down` `o` `shift+o` `f` | step between exchanges / open the selected one in place, headers then body / open every exchange / hold the view still while requests keep landing |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
 | devices | `shift+p` `shift+v` `shift+n` `shift+m` `shift+r` `shift+s` `shift+l` | sort by platform, via, name, model, runtime, state, last; same key again flips direction. Default: state (running, offline, shutdown), then most recent; ties by name desc, runtime desc |
 | apps | `enter` / `i` / `shift+i` / `ctrl+u` | launch / install via the OS file dialog (Finder on macOS, Explorer on Windows; falls back to the TUI picker elsewhere) / install via the TUI picker / uninstall |

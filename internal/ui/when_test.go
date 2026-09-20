@@ -34,9 +34,7 @@ func TestFlowDetailShowsBothEnds(t *testing.T) {
 		Method: "GET", URL: "https://api.example.com/v1/me", Status: 200, Kind: proxy.KindHTTP,
 		Done: true, Start: at, Duration: 146 * time.Millisecond,
 	}
-	var b strings.Builder
-	writeOverview(&b, f)
-	text := plainRow(b.String())
+	text := plainRow(exchangeText(f))
 	for _, want := range []string{"2026-09-20 12:04:01.244", "2026-09-20 12:04:01.390", "146ms"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the detail is missing %q:\n%s", want, text)

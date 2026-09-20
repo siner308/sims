@@ -142,11 +142,9 @@ func TestTunnelRowExplainsItself(t *testing.T) {
 	if got := statusCell(f); !strings.Contains(got, "tunnel") {
 		t.Errorf("status cell = %q", got)
 	}
-	var b strings.Builder
-	writeOverview(&b, f)
-	text := b.String()
+	text := exchangeText(f)
 	if !strings.Contains(text, "pins its") {
-		t.Errorf("overview does not explain the tunnel:\n%s", text)
+		t.Errorf("the exchange read in full does not explain the tunnel:\n%s", text)
 	}
 }
 

@@ -155,9 +155,9 @@ func TestEnterOnADomainFoldsIt(t *testing.T) {
 
 	a.tv.QueueUpdate(func() { v.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)) })
 	waitFor(t, a, 5*time.Second, func() bool { return v.collapsed["api.example.com"] })
-	// the flow view must not have opened
-	if _, opened := a.top().(*flowView); opened {
-		t.Error("enter on a domain heading opened a flow")
+	// a heading is not an exchange, so enter must not open one to read
+	if _, opened := a.top().(*readerView); opened {
+		t.Error("enter on a domain heading opened an exchange")
 	}
 }
 
