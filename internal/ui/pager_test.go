@@ -57,3 +57,32 @@ func TestPagerRunsAndTheTUIComesBack(t *testing.T) {
 		t.Fatal("the TUI did not come back after the pager exited")
 	}
 }
+
+// sims owns the terminal's alternate screen. A pager that opens its own leaves the TUI drawn over
+// it and the keyboard somewhere neither expects, which is what `q` walking into a dead screen looks
+// like. less is kept on the current screen for that reason.
+func TestLessKeepsTheCurrentScreen(t *testing.T) {
+	t.Setenv("PAGER", "less")
+	name, args := viewerFor(false)
+	if name != "less" {
+		t.Fatalf("pager = %q", name)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-X", "-R", "-F"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("less is missing %q: %v", want, args)
+		}
+	}
+
+	// a pager the user configured with flags of their own is left as they wrote it
+	t.Setenv("PAGER", "less -S")
+	if _, args := viewerFor(false); len(args) != 1 || args[0] != "-S" {
+		t.Errorf("the user's own flags were changed: %v", args)
+	}
+
+	// and an unknown pager is run as named
+	t.Setenv("PAGER", "bat")
+	if name, args := viewerFor(false); name != "bat" || len(args) != 0 {
+		t.Errorf("bat = %q %v", name, args)
+	}
+}

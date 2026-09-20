@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -27,19 +28,22 @@ func (a *App) openExternally(title, body string, editor bool) {
 		a.flashErr(fmt.Errorf("no %s is set; export PAGER or EDITOR", viewerVar(editor)))
 		return
 	}
-	cmd := exec.Command(name, append(args, path)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	// Suspend gives the terminal to the tool and takes it back when this returns
-	a.tv.Suspend(func() {
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "sims: %s: %v\n", name, err)
-		}
-	})
-	a.flash("read it in " + name + "; the file is at " + path)
+	// Suspend blocks its caller for as long as the tool is open, and this runs from a key handler
+	// on the UI goroutine: calling it there would freeze every redraw and keystroke behind the
+	// pager, including the ones tview needs to hand the screen back cleanly.
+	go func() {
+		a.tv.Suspend(func() {
+			cmd := exec.Command(name, append(args, path)...)
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "sims: %s: %v\n", name, err)
+			}
+		})
+		a.tv.QueueUpdateDraw(func() { a.flash("read in " + name + "; the file is at " + path) })
+	}()
 }
 
-// viewerFor is the tool to open with, and the arguments it needs. A pager gets the flags that make
-// it behave: colour through, and no paging for something that already fits.
+// viewerFor is the tool to open with, and the arguments it needs.
 func viewerFor(editor bool) (string, []string) {
 	if editor {
 		if v := firstWord(os.Getenv("VISUAL")); v != "" {
@@ -52,12 +56,30 @@ func viewerFor(editor bool) (string, []string) {
 	}
 	if v := os.Getenv("PAGER"); v != "" {
 		fields := strings.Fields(v)
-		return fields[0], fields[1:]
+		return fields[0], pagerFlags(fields[0], fields[1:])
 	}
 	if _, err := exec.LookPath("less"); err == nil {
-		return "less", []string{"-R", "-F", "-X"}
+		return "less", pagerFlags("less", nil)
 	}
 	return "", nil
+}
+
+// pagerFlags adds what a pager needs to hand the screen back cleanly. sims already owns the
+// terminal's alternate screen, so a pager that opens its own leaves the TUI drawn over and the
+// keyboard somewhere neither of them expects. -X keeps less on the current screen, -R lets colour
+// through and -F exits at once for something that already fits. A pager the user configured with
+// its own flags is left alone.
+func pagerFlags(name string, given []string) []string {
+	if len(given) > 0 {
+		return given
+	}
+	switch filepath.Base(name) {
+	case "less":
+		return []string{"-R", "-F", "-X"}
+	case "more":
+		return []string{"-e"}
+	}
+	return nil
 }
 
 func viewerVar(editor bool) string {
