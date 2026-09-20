@@ -937,3 +937,41 @@ func TestASlowAttributionDoesNotStallTheRequest(t *testing.T) {
 		t.Errorf("the first request waited %v on the attribution lookup", took.Round(time.Millisecond))
 	}
 }
+
+// An IPv6 literal is full of colons. Appending the default port to a bare one used to produce an
+// address that no longer parses, and a TLS handshake with an empty server name.
+func TestDialHandlesBareIPv6(t *testing.T) {
+	ln, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback here")
+	}
+	defer ln.Close()
+	accepted := make(chan struct{}, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- struct{}{}
+		c.Close()
+	}()
+
+	srv := &proxy.Server{Store: proxy.NewStore(0)}
+	if _, err := srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	conn, err := srv.DialForTest(t.Context(), "http", fmt.Sprintf("[::1]:%d", port))
+	if err != nil {
+		t.Fatalf("a bracketed IPv6 host did not dial: %v", err)
+	}
+	conn.Close()
+
+	select {
+	case <-accepted:
+	case <-time.After(3 * time.Second):
+		t.Error("the dial never reached the listener")
+	}
+}

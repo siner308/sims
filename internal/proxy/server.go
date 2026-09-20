@@ -473,17 +473,20 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request, scheme string
 }
 
 func (s *Server) dial(ctx context.Context, scheme, host string) (net.Conn, error) {
-	if _, _, err := net.SplitHostPort(host); err != nil {
+	// an IPv6 literal is full of colons, so appending ":443" to a bare one produces an address that
+	// no longer parses and a TLS handshake with an empty server name
+	name, port, err := net.SplitHostPort(host)
+	if err != nil {
+		name = host
+		port = "80"
 		if scheme == "https" {
-			host += ":443"
-		} else {
-			host += ":80"
+			port = "443"
 		}
+		host = net.JoinHostPort(name, port)
 	}
 	d := &net.Dialer{Timeout: 30 * time.Second}
 	if scheme == "https" {
-		serverName, _, _ := net.SplitHostPort(host)
-		return (&tls.Dialer{NetDialer: d, Config: &tls.Config{ServerName: serverName}}).DialContext(ctx, "tcp", host)
+		return (&tls.Dialer{NetDialer: d, Config: &tls.Config{ServerName: name}}).DialContext(ctx, "tcp", host)
 	}
 	return d.DialContext(ctx, "tcp", host)
 }
@@ -758,4 +761,9 @@ func (s *Server) RecordForTest(f Flow) {
 	l := &liveFlow{f: f}
 	s.Store.add(l)
 	s.Store.touch(l)
+}
+
+// DialForTest reaches an upstream the way the proxy does.
+func (s *Server) DialForTest(ctx context.Context, scheme, host string) (net.Conn, error) {
+	return s.dial(ctx, scheme, host)
 }
