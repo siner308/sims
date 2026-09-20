@@ -70,6 +70,8 @@ type App struct {
 	version     string
 	newVersion  string // release newer than version, once the startup check has found one
 	applyUpdate func(ctx context.Context, tag string) error
+	// editor is the one picked this session, so reading the next exchange does not ask again.
+	editor *guiEditor
 }
 
 func New(version string, m *sims.Manager) *App {

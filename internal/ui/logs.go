@@ -107,7 +107,8 @@ func (v *logsView) Hints() []hint {
 	}
 	return append(append(hints, groupBreak,
 		hint{"up/down", "step exchanges"}, hint{"o", "open headers, then body"},
-		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"e", "open in $EDITOR"},
+		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"e", "open in an editor"},
+		hint{"shift+e", "pick another editor"},
 		groupBreak),
 		append(layers, hint{"ctrl+k", "stop capture"})...)
 }
@@ -319,7 +320,7 @@ func (v *logsView) openMore() {
 // readSelected opens the exchange in full. editor sends it straight out to $EDITOR; otherwise it
 // opens on a page of its own inside sims, which esc closes, and enter there hands the same text to
 // $PAGER for folding and copying out.
-func (v *logsView) readSelected(editor bool) {
+func (v *logsView) readSelected(editor, pick bool) {
 	if !v.mixing() {
 		return
 	}
@@ -333,7 +334,7 @@ func (v *logsView) readSelected(editor bool) {
 	}
 	title, body := f.Method+"-"+hostOf(f), exchangeText(f)
 	if editor {
-		v.app.openExternally(title, body, true)
+		v.app.openInEditor(title, body, pick)
 		return
 	}
 	v.app.push(newReaderView(v.app, title, body))
@@ -652,8 +653,8 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.openMore()
 	case 'O':
 		v.openAll()
-	case 'e':
-		v.readSelected(true)
+	case 'e', 'E':
+		v.readSelected(true, ev.Rune() == 'E')
 	default:
 		switch ev.Key() {
 		case tcell.KeyDown:
@@ -670,7 +671,7 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			}
 		case tcell.KeyEnter:
 			if v.mixing() {
-				v.readSelected(false)
+				v.readSelected(false, false)
 				return nil
 			}
 		case tcell.KeyCtrlK:

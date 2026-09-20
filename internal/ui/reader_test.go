@@ -21,7 +21,7 @@ func TestEnterReadsInsideSimsAndEscComesBack(t *testing.T) {
 		return len(v.exchanges()) > 0
 	})
 
-	a.tv.QueueUpdate(func() { v.readSelected(false) })
+	a.tv.QueueUpdate(func() { v.readSelected(false, false) })
 
 	var rv *readerView
 	waitFor(t, a, 5*time.Second, func() bool {

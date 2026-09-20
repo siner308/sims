@@ -55,7 +55,7 @@ func (v *flowsView) Name() string               { return "proxy" }
 func (v *flowsView) Primitive() tview.Primitive { return v.table }
 func (v *flowsView) Hints() []hint {
 	return []hint{
-		{"enter", "read"}, {"e", "open in $EDITOR"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
+		{"enter", "read"}, {"e", "open in an editor"}, {"shift+e", "pick another editor"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
 		{"d", "device only"}, {"s", "save har"}, {"l", "mix with the log"},
 		groupBreak,
 		{"g", "group by domain"}, {"space", "fold a domain"}, {"shift+g", "fold or unfold all"},
@@ -468,9 +468,9 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.saveHAR()
 	case 'l':
 		v.mixWithLog()
-	case 'e':
+	case 'e', 'E':
 		if f, ok := v.selected(); ok {
-			v.app.openExternally(f.Method+"-"+hostOf(f), exchangeText(f), true)
+			v.app.openInEditor(f.Method+"-"+hostOf(f), exchangeText(f), ev.Rune() == 'E')
 		}
 	case 'r':
 		v.reload()

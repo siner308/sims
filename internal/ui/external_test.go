@@ -3,7 +3,7 @@ package ui
 import (
 	"net/http"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,24 +61,12 @@ func TestExchangeTextExplainsATunnel(t *testing.T) {
 	}
 }
 
-// The viewer is whatever the user already configured.
-func TestViewerFollowsTheEnvironment(t *testing.T) {
+// The pager is whatever the user already configured.
+func TestPagerFollowsTheEnvironment(t *testing.T) {
 	t.Setenv("PAGER", "bat --style=plain")
-	name, args := viewerFor(false)
+	name, args := pagerCommand()
 	if name != "bat" || len(args) != 1 || args[0] != "--style=plain" {
 		t.Errorf("pager = %q %v", name, args)
-	}
-
-	t.Setenv("VISUAL", "")
-	t.Setenv("EDITOR", "vim")
-	if name, _ := viewerFor(true); name != "vim" {
-		t.Errorf("editor = %q", name)
-	}
-
-	// VISUAL wins over EDITOR, which is the convention
-	t.Setenv("VISUAL", "code -w")
-	if name, _ := viewerFor(true); name != "code" {
-		t.Errorf("editor = %q, want VISUAL to win", name)
 	}
 }
 
@@ -102,17 +90,31 @@ func TestScratchFileHoldsTheExchange(t *testing.T) {
 	}
 }
 
-// Reading an exchange has to work on a machine where EDITOR was never set, which is most of them.
-// Sending the reader off to configure a shell instead of opening the editor already installed is a
-// dead end at the moment they wanted to read something.
-func TestEditorFallsBackWhenNothingIsConfigured(t *testing.T) {
-	t.Setenv("VISUAL", "")
-	t.Setenv("EDITOR", "")
-	name, _ := viewerFor(true)
-	if name == "" {
-		t.Fatal("e reports no editor even though the system has one")
+// The editors offered come from the system, so an editor installed under any name is there and one
+// that is not installed never is. A hardcoded list would have shown neither correctly.
+func TestEditorsComeFromTheSystem(t *testing.T) {
+	sample := filepath.Join(t.TempDir(), "sample.txt")
+	if err := os.WriteFile(sample, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := exec.LookPath(name); err != nil {
-		t.Errorf("editor = %q, which is not installed: %v", name, err)
+	found := guiEditors(sample)
+	// every desktop registers something for a text file, so an empty list means the query itself
+	// broke rather than that the machine has nothing: skipping here hid exactly that
+	if len(found) == 0 {
+		t.Fatal("no editors came back; the query for what opens a text file failed")
+	}
+	for _, e := range found {
+		if e.Name == "" {
+			t.Error("an editor was offered with no name")
+		}
+		if e.Open == nil {
+			t.Errorf("%q cannot be opened", e.Name)
+		}
+	}
+	// the order is stable, so the list does not shuffle between openings
+	for i := 1; i < len(found); i++ {
+		if found[i-1].Name > found[i].Name {
+			t.Errorf("the list is not in a stable order: %q before %q", found[i-1].Name, found[i].Name)
+		}
 	}
 }

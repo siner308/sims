@@ -32,7 +32,7 @@ func TestPagerRunsAndTheTUIComesBack(t *testing.T) {
 		return len(v.exchanges()) > 0
 	})
 
-	a.tv.QueueUpdate(func() { v.readSelected(false) })
+	a.tv.QueueUpdate(func() { v.readSelected(false, false) })
 	var rv *readerView
 	waitFor(t, a, 5*time.Second, func() bool {
 		rv, _ = a.top().(*readerView)
@@ -72,7 +72,7 @@ func TestPagerRunsAndTheTUIComesBack(t *testing.T) {
 // after q looks like.
 func TestLessKeepsTheCurrentScreen(t *testing.T) {
 	t.Setenv("PAGER", "less")
-	name, args := viewerFor(false)
+	name, args := pagerCommand()
 	if name != "less" {
 		t.Fatalf("pager = %q", name)
 	}
@@ -88,13 +88,13 @@ func TestLessKeepsTheCurrentScreen(t *testing.T) {
 
 	// a pager the user configured with flags of their own is left as they wrote it
 	t.Setenv("PAGER", "less -S")
-	if _, args := viewerFor(false); len(args) != 1 || args[0] != "-S" {
+	if _, args := pagerCommand(); len(args) != 1 || args[0] != "-S" {
 		t.Errorf("the user's own flags were changed: %v", args)
 	}
 
 	// and an unknown pager is run as named
 	t.Setenv("PAGER", "bat")
-	if name, args := viewerFor(false); name != "bat" || len(args) != 0 {
+	if name, args := pagerCommand(); name != "bat" || len(args) != 0 {
 		t.Errorf("bat = %q %v", name, args)
 	}
 }

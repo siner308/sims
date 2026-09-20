@@ -12,21 +12,20 @@ import (
 	"github.com/siner308/sims/internal/proxy"
 )
 
-// openExternally hands text to the tool the user already reads text with. A terminal table is a
-// poor place to read a long JSON body: there is no search that survives a redraw, no folding, and
-// no copying out. A pager or an editor has all three, and the user has already configured which.
+// openInPager hands the text to $PAGER for folding and searching. The TUI is suspended for the
+// duration, so the pager owns the terminal, and resumes when it exits.
 //
-// The TUI is suspended for the duration, so the tool owns the terminal, and resumes when it exits.
-func (a *App) openExternally(title, body string, editor bool) {
+// An editor goes through openInEditor instead: a terminal editor would need this same terminal, and
+// a reader who then quits it is left looking at a screen sims no longer owns.
+func (a *App) openInPager(title, body string) {
 	path, err := writeScratch(title, body)
 	if err != nil {
 		a.flashErr(err)
 		return
 	}
-	name, args := viewerFor(editor)
+	name, args := pagerCommand()
 	if name == "" {
-		a.flashErr(fmt.Errorf("no %s is set and none of %s is installed; put `export %s=<your editor>` in ~/.zshrc",
-			viewerVar(editor), strings.Join(fallbackEditors, ", "), viewerVar(editor)))
+		a.flashErr(fmt.Errorf("no PAGER is set and less is not installed"))
 		return
 	}
 	// Suspend blocks its caller for as long as the tool is open, and this runs from a key handler
@@ -48,24 +47,8 @@ func (a *App) openExternally(title, body string, editor bool) {
 	}()
 }
 
-// viewerFor is the tool to open with, and the arguments it needs.
-func viewerFor(editor bool) (string, []string) {
-	if editor {
-		if v := firstWord(os.Getenv("VISUAL")); v != "" {
-			return v, nil
-		}
-		if v := firstWord(os.Getenv("EDITOR")); v != "" {
-			return v, nil
-		}
-		// EDITOR is unset far more often than PAGER, and an error telling the reader to go and
-		// configure a shell is a worse answer than opening the editor every Unix already has
-		for _, name := range fallbackEditors {
-			if _, err := exec.LookPath(name); err == nil {
-				return name, nil
-			}
-		}
-		return "", nil
-	}
+// pagerCommand is the pager to open with, and the arguments it needs.
+func pagerCommand() (string, []string) {
 	if v := os.Getenv("PAGER"); v != "" {
 		fields := strings.Fields(v)
 		return fields[0], pagerFlags(fields[0], fields[1:])
@@ -92,22 +75,15 @@ func pagerFlags(name string, given []string) []string {
 	return nil
 }
 
-// fallbackEditors are tried in order when neither VISUAL nor EDITOR is set, easiest first.
-var fallbackEditors = []string{"nano", "vim", "vi"}
-
-func viewerVar(editor bool) string {
-	if editor {
-		return "EDITOR"
+// openInEditor writes the text out and opens it in a windowed editor, chosen the first time and
+// remembered after that. pick asks again, for a different editor or one installed since.
+func (a *App) openInEditor(title, body string, pick bool) {
+	path, err := writeScratch(title, body)
+	if err != nil {
+		a.flashErr(err)
+		return
 	}
-	return "PAGER"
-}
-
-func firstWord(s string) string {
-	fields := strings.Fields(s)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
+	a.chooseEditor(path, pick)
 }
 
 // writeScratch puts the text somewhere the tool can open it, named after what it holds so a tab in

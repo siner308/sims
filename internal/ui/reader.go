@@ -41,7 +41,7 @@ func (v *readerView) Hints() []hint {
 		{"/", "find"}, {"n", "next match"}, {"shift+n", "previous"},
 		{"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"},
 		groupBreak,
-		{"enter", "read in $PAGER"}, {"e", "open in $EDITOR"}, {"esc", "back"},
+		{"enter", "read in $PAGER"}, {"e", "open in an editor"}, {"shift+e", "pick another editor"}, {"esc", "back"},
 	}
 }
 
@@ -135,9 +135,9 @@ func (v *readerView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	case ev.Rune() == 'G':
 		v.text.ScrollToEnd()
 	case ev.Key() == tcell.KeyEnter:
-		v.app.openExternally(v.title, v.body, false)
-	case ev.Rune() == 'e':
-		v.app.openExternally(v.title, v.body, true)
+		v.app.openInPager(v.title, v.body)
+	case ev.Rune() == 'e', ev.Rune() == 'E':
+		v.app.openInEditor(v.title, v.body, ev.Rune() == 'E')
 	default:
 		return ev
 	}
