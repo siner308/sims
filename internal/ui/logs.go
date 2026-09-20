@@ -50,6 +50,9 @@ type logsView struct {
 	warnedDeviceWide bool
 	// closed is set once the view leaves the stack, so a late Refresh does not revive it.
 	closed bool
+	// logOff turns the log layer off, leaving the traffic. The two are layers of one stream rather
+	// than two screens, so either can be dropped without leaving the other.
+	logOff bool
 	// opened says how much of each exchange is shown; the cursor's own level is kept separately so
 	// opening one does not open every one.
 	opened map[string]detail
@@ -65,12 +68,19 @@ func newLogsView(a *App, d device.Device, only *device.App) *logsView {
 	return v
 }
 
-// mixing reports whether the device's traffic is being shown alongside the log.
+// mixing reports whether the device's traffic layer is on.
 func (v *logsView) mixing() bool { return v.session != nil }
 
+// showingLog reports whether the log layer is on. Both layers are the same stream, and each is
+// toggled on its own: t adds or removes the traffic, l the log.
+func (v *logsView) showingLog() bool { return !v.logOff }
+
 func (v *logsView) Name() string {
-	if v.mixing() {
+	switch {
+	case v.mixing() && v.showingLog():
 		return "logs+traffic"
+	case v.mixing():
+		return "traffic"
 	}
 	return "logs"
 }
@@ -83,14 +93,40 @@ func (v *logsView) Primitive() tview.Primitive { return v.text }
 
 func (v *logsView) Hints() []hint {
 	hints := []hint{{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"w", "toggle wrap"}, {"g", "top"}, {"shift+g", "bottom"}}
-	if v.mixing() {
-		return append(hints, groupBreak,
-			hint{"n", "next exchange"}, hint{"shift+n", "previous"}, hint{"o", "open headers, then body"},
-			hint{"O", "open every exchange"}, hint{"enter", "full screen"},
-			groupBreak,
-			hint{"t", "hide traffic"}, hint{"ctrl+k", "stop capture"})
+	layers := []hint{{"t", v.layerHint(v.mixing(), "traffic")}, {"l", v.layerHint(v.showingLog(), "log")}}
+	if !v.mixing() {
+		return append(append(hints, groupBreak), layers...)
 	}
-	return append(hints, groupBreak, hint{"t", "mix in traffic"})
+	return append(append(hints, groupBreak,
+		hint{"n", "next exchange"}, hint{"shift+n", "previous"}, hint{"o", "open headers, then body"},
+		hint{"O", "open every exchange"}, hint{"enter", "read in $PAGER"}, hint{"e", "open in $EDITOR"},
+		groupBreak),
+		append(layers, hint{"ctrl+k", "stop capture"})...)
+}
+
+func (v *logsView) layerHint(on bool, what string) string {
+	if on {
+		return "hide " + what
+	}
+	return "show " + what
+}
+
+// toggleLog turns the log layer off or on. With the traffic off too there is nothing to show, so
+// the last layer stays.
+func (v *logsView) toggleLog() {
+	if v.showingLog() && !v.mixing() {
+		v.app.flashErr(fmt.Errorf("this is the log; press t to add %s's traffic to it", v.dev.Name))
+		return
+	}
+	v.logOff = v.showingLog()
+	v.app.drawHeader()
+	if v.showingLog() {
+		// the stream was traffic only, so the log has to start flowing again
+		v.Refresh()
+		return
+	}
+	v.stop()
+	v.redraw()
 }
 
 // close stops the log stream and the traffic follower; whatever takes the view off the stack calls
@@ -160,7 +196,8 @@ func (v *logsView) watchTraffic() {
 				dirty = false
 				v.app.tv.QueueUpdateDraw(func() {
 					// by the time this runs the traffic may have been switched off
-					if v.session != session || v.paused {
+					// the traffic layer may have gone off between the tick and this callback
+					if v.session != session || v.timeline == nil || v.paused {
 						return
 					}
 					v.timeline.setFlows(session.Flows())
@@ -180,6 +217,9 @@ func (v *logsView) unwatchTraffic() {
 
 // exchanges are the entries in the stream that are requests or responses, in the order shown.
 func (v *logsView) exchanges() []entry {
+	if v.timeline == nil {
+		return nil
+	}
 	var out []entry
 	for _, e := range v.visibleEntries() {
 		if e.kind != entryLog {
@@ -280,6 +320,24 @@ func (v *logsView) openMore() {
 	v.text.ScrollToHighlight()
 }
 
+// readSelected hands the exchange to a pager or an editor. A terminal pane is a poor place to read
+// a long body: the tool the user already reads text with has search, folding and copying, and this
+// one has none of them.
+func (v *logsView) readSelected(editor bool) {
+	if !v.mixing() {
+		return
+	}
+	if v.cursor == "" {
+		v.step(true)
+	}
+	f, ok := v.selectedFlow()
+	if !ok {
+		v.app.flash("no exchange selected; press n first")
+		return
+	}
+	v.app.openExternally(f.Method+"-"+hostOf(f), exchangeText(f), editor)
+}
+
 // openAll opens every exchange at once, for reading a whole conversation rather than one call.
 func (v *logsView) openAll() {
 	if !v.mixing() {
@@ -303,17 +361,38 @@ func (v *logsView) openAll() {
 }
 
 func (v *logsView) visibleEntries() []entry {
+	// the timeline only exists while the traffic layer is on; with it off the stream is plain log
+	// lines and there is nothing here to show
+	if v.timeline == nil {
+		return nil
+	}
 	var out []entry
 	for _, e := range v.timeline.all() {
-		if e.matches(v.filter) {
-			out = append(out, e)
+		if e.kind == entryLog && !v.showingLog() {
+			continue
 		}
+		if !e.matches(v.filter) {
+			continue
+		}
+		out = append(out, e)
 	}
 	return out
 }
 
 func (v *logsView) Refresh() {
 	if v.closed {
+		return
+	}
+	if !v.showingLog() {
+		// traffic only: no log process to start, but the timeline still needs the exchanges
+		if v.mixing() {
+			if v.timeline == nil {
+				v.timeline = newTimeline(logBuffer)
+			}
+			v.timeline.setFlows(v.session.Flows())
+			v.watchTraffic()
+			v.redraw()
+		}
 		return
 	}
 	if v.mixing() {
@@ -440,7 +519,7 @@ func (v *logsView) append(chunk []string) {
 		v.lines = v.lines[len(v.lines)-logBuffer:]
 	}
 	v.mu.Unlock()
-	if v.mixing() {
+	if v.mixing() && v.timeline != nil {
 		now := time.Now()
 		for _, l := range chunk {
 			v.timeline.addLog(l, now)
@@ -520,6 +599,9 @@ func (v *logsView) title() string {
 		}
 		return fmt.Sprintf(" logs @ %s ", v.dev.Name)
 	}
+	if !v.showingLog() {
+		return fmt.Sprintf(" traffic @ %s :%d ", v.dev.Name, v.session.Port)
+	}
 	// the log can be one app's, the traffic never is: a device's connections do not say which app
 	// opened them, so the title says whose each half is rather than putting one name over both
 	if v.only != nil {
@@ -536,7 +618,7 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.mu.Lock()
 		v.lines = nil
 		v.mu.Unlock()
-		if v.mixing() {
+		if v.mixing() && v.timeline != nil {
 			v.timeline.clear()
 			v.session.Store.Clear()
 			// the exchanges are gone, so what was opened and where the cursor sat are too
@@ -559,6 +641,8 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.Refresh()
 	case 't':
 		v.toggleTraffic()
+	case 'l':
+		v.toggleLog()
 	case 'n':
 		v.step(true)
 	case 'N':
@@ -567,17 +651,13 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.openMore()
 	case 'O':
 		v.openAll()
+	case 'e':
+		v.readSelected(true)
 	default:
 		switch ev.Key() {
 		case tcell.KeyEnter:
 			if v.mixing() {
-				// with nothing selected yet, enter takes the newest exchange rather than doing nothing
-				if v.cursor == "" {
-					v.step(true)
-				}
-				if f, ok := v.selectedFlow(); ok {
-					v.app.push(newFlowView(v.app, v.session, f.ID))
-				}
+				v.readSelected(false)
 				return nil
 			}
 		case tcell.KeyCtrlK:

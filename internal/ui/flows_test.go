@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"github.com/gdamore/tcell/v2"
 	"net/http"
 	"strings"
 	"testing"
@@ -353,9 +352,10 @@ func TestOpenAllTogglesEverything(t *testing.T) {
 	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 0 })
 }
 
-// enter with nothing selected has to do something useful rather than nothing: the newest exchange is
-// what the reader is watching arrive.
-func TestEnterWithNoCursorOpensTheNewestExchange(t *testing.T) {
+// enter with nothing selected has to act on something useful rather than nothing: the newest
+// exchange is what the reader is watching arrive. It goes to a pager, so what is checked here is
+// which exchange was chosen, not what the pager did with it.
+func TestEnterWithNoCursorTakesTheNewestExchange(t *testing.T) {
 	a, lv, s, stop := mergedView(t)
 	defer stop()
 
@@ -366,19 +366,16 @@ func TestEnterWithNoCursorOpensTheNewestExchange(t *testing.T) {
 		return len(lv.exchanges()) == 4
 	})
 
-	a.tv.QueueUpdate(func() { lv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)) })
-
-	var fv *flowView
+	// with no cursor, the step enter makes must land on the newest exchange
+	a.tv.QueueUpdate(func() { lv.step(true) })
+	var got proxy.Flow
 	waitFor(t, a, 5*time.Second, func() bool {
-		fv, _ = a.top().(*flowView)
-		return fv != nil
+		f, ok := lv.selectedFlow()
+		got = f
+		return ok
 	})
-	f, ok := s.Store.Get(fv.id)
-	if !ok {
-		t.Fatalf("flow %d is not in the store", fv.id)
-	}
-	if !strings.Contains(f.URL, "newest") {
-		t.Errorf("enter opened %q, want the newest exchange", f.URL)
+	if !strings.Contains(got.URL, "newest") {
+		t.Errorf("enter would open %q, want the newest exchange", got.URL)
 	}
 }
 

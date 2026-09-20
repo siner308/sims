@@ -74,7 +74,7 @@ func (v *devicesView) Hints() []hint {
 	// that mean something for it
 	if d, ok := v.selected(); ok && d.IsHost() {
 		return []hint{
-			{"enter", "apps running here"}, {"t", "watch this machine's traffic"}, {"l", "system log"},
+			{"enter", "apps running here"}, {"t", "traffic stream"}, {"shift+t", "traffic as a table"}, {"l", "system log"},
 			groupBreak,
 			{"/", "filter"}, {"s", "show unused sims"},
 			groupBreak,
@@ -86,7 +86,7 @@ func (v *devicesView) Hints() []hint {
 		{"ctrl+k", "shutdown"}, {"ctrl+e", "wipe data (keep device)"}, {"ctrl+d", "delete device"},
 		groupBreak,
 		{"n", "new device"}, {"e", "edit hardware (avd)"}, {"s", "show unused sims"}, {"/", "filter"}, {"p", "pair (ios)"},
-		{"w", "connect wifi"}, {"x", "disconnect wifi"}, {"t", "watch traffic"},
+		{"w", "connect wifi"}, {"x", "disconnect wifi"}, {"t", "traffic stream"}, {"shift+t", "traffic as a table"},
 		groupBreak,
 		{"h", "home key"}, {"backspace", "back key"}, {"o", "overview key"},
 		groupBreak,
@@ -307,6 +307,8 @@ func (v *devicesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.pair()
 	case 't':
 		v.watchTraffic()
+	case 'T':
+		v.watchTrafficAsTable()
 	case 'e':
 		v.editHardware()
 	case 's':
@@ -439,6 +441,22 @@ const pairingGuide = "Before answering yes:\n" +
 // watchTraffic opens the flows of a running capture, or starts one first. Both device paths land in
 // the same view.
 func (v *devicesView) watchTraffic() {
+	d, ok := v.selected()
+	if !ok {
+		return
+	}
+	// t opens the stream with the traffic layer on and the log off; l inside it adds the log. The
+	// table is a different way of reading the same capture, reached with shift+t.
+	withCapture(v.app, d, func(s *capture.Session) {
+		stream := newLogsView(v.app, d, nil)
+		stream.session = s
+		stream.logOff = true
+		v.app.push(stream)
+	})
+}
+
+// watchTrafficAsTable opens the capture as the flows table, which groups by domain and sorts.
+func (v *devicesView) watchTrafficAsTable() {
 	d, ok := v.selected()
 	if !ok {
 		return

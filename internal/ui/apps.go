@@ -196,9 +196,9 @@ func (v *appsView) watchWithApp() {
 		return
 	}
 	withCapture(v.app, v.dev, func(s *capture.Session) {
-		logs := newLogsView(v.app, v.dev, &app)
-		logs.session = s
-		v.app.push(logs)
+		stream := newLogsView(v.app, v.dev, &app)
+		stream.session = s
+		v.app.push(stream)
 	})
 }
 

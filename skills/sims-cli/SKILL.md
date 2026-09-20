@@ -78,7 +78,7 @@ sims skill [install [--dir <skills-dir>] [--refresh]]   # print this file / inst
 It prints one line per exchange (`--json` prints a record per flow, headers and both bodies included: `requestBody` and `responseBody`, decoded from gzip/brotli, with `responseBodyEncoding: "base64"` when the body is not text) and restores the device and this
 machine on exit. An iOS simulator has no network settings of its own, so its capture points this Mac's
 web proxy at sims for as long as it runs; other apps on the Mac are relayed untouched and are not
-captured unless `--all` is given. In the TUI, `g` groups the captured traffic by domain, which is how a device's traffic is read when the app behind it is unknown. A device's connections do not say which app opened them, so traffic captured from a phone or an emulator is the whole device's; only a simulator or this machine names the sending process. Never report a captured request as a particular app's unless the flow's `process` field says so.
+captured unless `--all` is given. In the TUI the log and the traffic are two layers of one stream, toggled with `l` and `t`; `shift+t` on a device opens the capture as a table instead, where `g` groups it by domain, which is how a device's traffic is read when the app behind it is unknown. A device's connections do not say which app opened them, so traffic captured from a phone or an emulator is the whole device's; only a simulator or this machine names the sending process. Never report a captured request as a particular app's unless the flow's `process` field says so.
 
 A `tunnel` line is traffic sims could not open, which means the app
 pins its certificate: that is a limit of every proxy, not a failure to report.

@@ -36,7 +36,11 @@ func TestPressingTStartsAndStopsACapture(t *testing.T) {
 		return running
 	})
 	waitFor(t, a, 10*time.Second, func() bool {
-		_, ok := a.top().(*flowsView)
+		// t opens the stream with the traffic layer on; shift+t is the table
+		lv, ok := a.top().(*logsView)
+		if ok && !lv.mixing() {
+			return false
+		}
 		return ok
 	})
 

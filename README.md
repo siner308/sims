@@ -156,11 +156,14 @@ What sims could not read is still listed rather than hidden. An app that pins it
 every proxy, sims included; those rows show as `tunnel` and say why, which is the difference between
 a limit and a bug.
 
-Press `t` again from the log, or `l` from the traffic table, and the two run as one stream in time
-order: each request lands between the log lines that surround it, so "the app logged this, then sent
-that, and got a 401 back" reads top to bottom instead of being matched across two screens. Both
-platforms' log timestamps are read for the ordering, and a line sims cannot date keeps the place it
-arrived in. `t` takes the traffic back out, `ctrl+k` stops the capture and leaves the log running.
+The log and the traffic are two layers of one stream, each toggled on its own: `t` adds or removes
+the traffic, `l` the log. Start from either, `t` on a device for the traffic or `l` for the log, and
+press the other key to bring in the second layer. They run in time order, so each request lands
+between the log lines around it and "the app logged this, then sent that, and got a 401 back" reads
+top to bottom. Both platforms' log timestamps are read for the ordering, and a line sims cannot date
+keeps the place it arrived in. The last remaining layer stays on, since an empty stream says
+nothing. `shift+t` on a device opens the same capture as a table instead, which groups by domain and
+sorts. `ctrl+k` stops the capture and leaves the log running.
 
 From the apps view, `t` opens the selected app's log with the device's traffic beside it. The two
 halves have different scopes and the screen says so: the log is that app's, the traffic is
@@ -172,6 +175,10 @@ In that stream `n` and `shift+n` step between exchanges and `o` opens the one se
 once for its headers, again for its body, a third time to fold it away. `shift+o` opens every
 exchange at once, for reading a whole conversation. The request and the response open separately,
 because each carries its own headers.
+
+A long body is easier read somewhere with search and folding, so `enter` hands the whole exchange to
+`$PAGER` and `e` to `$EDITOR`, as plain text. sims steps out of the terminal while the tool has it
+and takes it back when the tool exits.
 
 ```
 12:04:01.220  I/MyApp  ( 1234): tapped sign in
@@ -299,8 +306,8 @@ sims skill > SKILL.md                   # for any other agent
 | devices | `n` / `e` / `s` / `/` | new device (opens images) / edit hardware of an AVD (RAM, cores, disk; applied at its next boot) / show never-booted simulators / filter |
 | devices | `w` / `x` | android: switch a USB device to adb over wifi / disconnect a wifi device. ios: open the wifi tunnel to a paired phone (`devicectl device info details`) |
 | devices | `p` | ios: pair a physical device (`devicectl manage pair`) |
-| devices | `t` | watch the device's HTTP traffic; press it again later to reopen a running capture |
-| proxy | `enter` `/` `c` `p` `d` `s` | inspect one exchange, filter, clear, pause, hide this machine's own apps, save a HAR file |
+| devices | `t` / `shift+t` | the device's traffic as a stream, which `l` adds its log to / the same capture as a table |
+| proxy | `enter` `e` `/` `c` `p` `d` `s` | read an exchange in `$PAGER`, open it in `$EDITOR`, filter, clear, pause, hide this machine's own apps, save a HAR file |
 | proxy | `g` / `space` / `shift+g` | group by domain (`enter` on a heading folds it) / fold one domain / fold or unfold every domain |
 | proxy | `ctrl+k` / `esc` | stop the capture and restore every setting / leave the view with the capture running |
 | flow | `tab` / `shift+tab` | overview, request, response |
@@ -312,9 +319,9 @@ sims skill > SKILL.md                   # for any other agent
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
 | logs | `/` `c` `p` `w` `g` `shift+g` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
-| logs | `t` | mix the device's traffic into the same stream, in time order; `t` again removes it |
+| logs, traffic | `t` / `l` | add or remove the traffic layer / the log layer; they are one stream and the last layer stays |
 | logs+traffic | `n` / `shift+n` / `o` / `shift+o` | step to the next exchange, the previous one, open the selected one (headers, then body, then closed), open or close every exchange |
-| logs+traffic | `enter` / `ctrl+k` | the selected exchange on its own screen / stop the capture and keep the log |
+| logs+traffic | `enter` / `e` / `ctrl+k` | read the selected exchange in `$PAGER` / open it in `$EDITOR` / stop the capture and keep the log |
 | proxy | `l` | show these exchanges in the log's stream instead of the table |
 | images | `n` or `enter` / `i` / `s` | new device from image / install image (android) / show downloadable images |
 

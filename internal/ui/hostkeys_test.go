@@ -62,16 +62,18 @@ func TestHostRefusesDeviceActionsInOneLine(t *testing.T) {
 		{"wipe", tcell.NewEventKey(tcell.KeyCtrlE, 0, tcell.ModNone)},
 		{"delete", tcell.NewEventKey(tcell.KeyCtrlD, 0, tcell.ModNone)},
 	} {
-		a.tv.QueueUpdate(func() { a.setStatus(""); dv.onKey(k.ev) })
+		a.tv.QueueUpdate(func() { a.clearStatus(); dv.onKey(k.ev) })
 		var status string
+		var asked bool
 		waitFor(t, a, 5*time.Second, func() bool {
 			status = a.status.GetText(true)
-			return strings.TrimSpace(status) != ""
+			asked = a.body.HasPage("confirm")
+			return strings.TrimSpace(status) != "" || asked
 		})
 		if !strings.Contains(status, "machine sims is running on") {
 			t.Errorf("%s: status = %q", k.name, status)
 		}
-		if a.body.HasPage("confirm") {
+		if asked {
 			t.Errorf("%s asked for confirmation of something it cannot do", k.name)
 		}
 	}

@@ -55,7 +55,7 @@ func (v *flowsView) Name() string               { return "proxy" }
 func (v *flowsView) Primitive() tview.Primitive { return v.table }
 func (v *flowsView) Hints() []hint {
 	return []hint{
-		{"enter", "inspect"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
+		{"enter", "read in $PAGER"}, {"e", "open in $EDITOR"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
 		{"d", "device only"}, {"s", "save har"}, {"l", "mix with the log"},
 		groupBreak,
 		{"g", "group by domain"}, {"space", "fold a domain"}, {"shift+g", "fold or unfold all"},
@@ -433,7 +433,7 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 		if f, ok := v.selected(); ok {
-			v.app.push(newFlowView(v.app, v.session, f.ID))
+			v.app.openExternally(f.Method+"-"+hostOf(f), exchangeText(f), false)
 		}
 		return nil
 	case tcell.KeyCtrlK:
@@ -471,6 +471,10 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.saveHAR()
 	case 'l':
 		v.mixWithLog()
+	case 'e':
+		if f, ok := v.selected(); ok {
+			v.app.openExternally(f.Method+"-"+hostOf(f), exchangeText(f), true)
+		}
 	case 'r':
 		v.reload()
 	default:
@@ -483,9 +487,9 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 // lines around them. The capture keeps running; only the way it is shown changes.
 func (v *flowsView) mixWithLog() {
 	v.close()
-	logs := newLogsView(v.app, v.dev, nil)
-	logs.session = v.session
-	v.app.replaceTop(logs)
+	stream := newLogsView(v.app, v.dev, nil)
+	stream.session = v.session
+	v.app.replaceTop(stream)
 }
 
 func (v *flowsView) stopCapture() {

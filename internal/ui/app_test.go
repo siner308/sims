@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -55,6 +56,15 @@ func (f *fakeProvider) DeviceTypes(context.Context) ([]device.DeviceType, error)
 
 func runHeadless(t *testing.T, a *App) (tcell.SimulationScreen, func()) {
 	t.Helper()
+	// a capture started from the UI writes its certificate and its in-flight record to the user
+	// cache; a test must not leave either behind, nor be interrupted by a record a previous one did
+	if os.Getenv("SIMS_PROXY_DIR") == "" {
+		t.Setenv("SIMS_PROXY_DIR", t.TempDir())
+	}
+	// reading an exchange hands it to $PAGER or $EDITOR; a test must not launch the user's
+	t.Setenv("PAGER", "true")
+	t.Setenv("EDITOR", "true")
+	t.Setenv("VISUAL", "")
 	screen := tcell.NewSimulationScreen("UTF-8")
 	if err := screen.Init(); err != nil {
 		t.Fatal(err)
