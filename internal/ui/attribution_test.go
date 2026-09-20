@@ -32,14 +32,14 @@ func TestAppScopedTitleDoesNotClaimTheTraffic(t *testing.T) {
 
 // A row whose sender sims does know says so, and one it does not stays silent rather than guessing.
 func TestRequestRowNamesTheSenderOnlyWhenKnown(t *testing.T) {
-	known := entry{kind: entryRequest, at: time.Now(), flow: proxy.Flow{
+	known := entry{kind: entryExchange, at: time.Now(), flow: proxy.Flow{
 		Method: "GET", URL: "https://api.example.com/v1/me", Process: "MobileSafari",
 	}}
 	if got := plainRow(known.render("", detailLine)); !strings.Contains(got, "MobileSafari") {
 		t.Errorf("a known sender was not shown: %q", got)
 	}
 
-	unknown := entry{kind: entryRequest, at: time.Now(), flow: proxy.Flow{
+	unknown := entry{kind: entryExchange, at: time.Now(), flow: proxy.Flow{
 		Method: "GET", URL: "https://ads.example.net/beacon",
 	}}
 	got := plainRow(unknown.render("", detailLine))

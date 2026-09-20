@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/siner308/sims/internal/proxy"
 )
 
 // enter opens the exchange inside sims, and esc goes back to the view it was read from. Handing it
@@ -74,5 +75,65 @@ func TestReaderFindsAndSteps(t *testing.T) {
 	onUIResult(a, func() bool { rv.find("nowhere"); return true }, 5*time.Second)
 	if rv.found != "" {
 		t.Errorf("a failed search was left active: %q", rv.found)
+	}
+}
+
+// The arrows step exchanges, which is what a reader reaches for before learning n and shift+n.
+func TestArrowsStepExchanges(t *testing.T) {
+	a, v, s, stop := streamFor(t, true)
+	defer stop()
+
+	send(s, "GET", "https://a.example.com/first", 200, "", "")
+	send(s, "POST", "https://b.example.com/second", 201, "", "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		v.timeline.setFlows(s.Flows())
+		return len(v.exchanges()) == 2
+	})
+
+	press := func(k tcell.Key) {
+		a.tv.QueueUpdate(func() { v.onKey(tcell.NewEventKey(k, 0, tcell.ModNone)) })
+	}
+
+	// down with nothing selected lands on the newest, the same place n does
+	press(tcell.KeyDown)
+	var got proxy.Flow
+	waitFor(t, a, 5*time.Second, func() bool {
+		f, ok := v.selectedFlow()
+		got = f
+		return ok
+	})
+	if !strings.Contains(got.URL, "second") {
+		t.Errorf("down selected %q, want the newest", got.URL)
+	}
+
+	// up walks back through the stream
+	press(tcell.KeyUp)
+	waitFor(t, a, 5*time.Second, func() bool {
+		f, ok := v.selectedFlow()
+		got = f
+		return ok && strings.Contains(f.URL, "first")
+	})
+	if !strings.Contains(got.URL, "first") {
+		t.Errorf("up selected %q, want the older one", got.URL)
+	}
+}
+
+// With the traffic off there are no exchanges to step, so the arrows have to go back to scrolling
+// the log rather than being swallowed.
+func TestArrowsScrollAPlainLog(t *testing.T) {
+	a, v, _, stop := streamFor(t, true)
+	defer stop()
+
+	a.tv.QueueUpdate(func() { v.toggleTraffic() })
+	waitFor(t, a, 5*time.Second, func() bool { return !v.mixing() })
+
+	var passed bool
+	onUIResult(a, func() bool {
+		ev := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+		passed = v.onKey(ev) == ev
+		return true
+	}, 5*time.Second)
+	if !passed {
+		t.Error("down was swallowed with no exchanges to step, so the log cannot be scrolled")
 	}
 }

@@ -278,7 +278,7 @@ func TestSteppingSelectsExchangesInOrder(t *testing.T) {
 	// waitFor runs its condition on the UI goroutine already; queueing from inside it would deadlock
 	waitFor(t, a, 5*time.Second, func() bool {
 		lv.timeline.setFlows(s.Flows())
-		return len(lv.exchanges()) == 4 // two exchanges, a request and a response each
+		return len(lv.exchanges()) == 2 // one line per exchange, request and response together
 	})
 
 	// with nothing selected, n starts at the newest exchange
@@ -314,7 +314,7 @@ func TestOpenAffectsOnlyTheSelectedExchange(t *testing.T) {
 	send(s, "GET", "https://b.example.com/two", 200, proxy.OriginDevice, "")
 	waitFor(t, a, 5*time.Second, func() bool {
 		lv.timeline.setFlows(s.Flows())
-		return len(lv.exchanges()) == 4
+		return len(lv.exchanges()) == 2
 	})
 
 	a.tv.QueueUpdate(func() { lv.step(true); lv.openMore() })
@@ -342,11 +342,11 @@ func TestOpenAllTogglesEverything(t *testing.T) {
 	send(s, "GET", "https://b.example.com/two", 200, proxy.OriginDevice, "")
 	waitFor(t, a, 5*time.Second, func() bool {
 		lv.timeline.setFlows(s.Flows())
-		return len(lv.exchanges()) == 4
+		return len(lv.exchanges()) == 2
 	})
 
 	a.tv.QueueUpdate(func() { lv.openAll() })
-	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 4 })
+	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 2 })
 
 	a.tv.QueueUpdate(func() { lv.openAll() })
 	waitFor(t, a, 5*time.Second, func() bool { return len(lv.opened) == 0 })
@@ -363,7 +363,7 @@ func TestEnterWithNoCursorTakesTheNewestExchange(t *testing.T) {
 	send(s, "GET", "https://b.example.com/newest", 200, proxy.OriginDevice, "")
 	waitFor(t, a, 5*time.Second, func() bool {
 		lv.timeline.setFlows(s.Flows())
-		return len(lv.exchanges()) == 4
+		return len(lv.exchanges()) == 2
 	})
 
 	// with no cursor, the step enter makes must land on the newest exchange
@@ -379,25 +379,25 @@ func TestEnterWithNoCursorTakesTheNewestExchange(t *testing.T) {
 	}
 }
 
-// With nothing selected, n should land on the newest request, not on its response: the request is
-// what a reader is looking for, and the response is on the next line.
-func TestFirstStepLandsOnTheRequest(t *testing.T) {
+// One exchange is one row, so stepping onto it selects the whole call rather than half of it.
+func TestOneExchangeIsOneRow(t *testing.T) {
 	a, lv, s, stop := mergedView(t)
 	defer stop()
 
 	send(s, "POST", "https://api.example.com/v1/login", 200, proxy.OriginDevice, "")
 	waitFor(t, a, 5*time.Second, func() bool {
 		lv.timeline.setFlows(s.Flows())
-		return len(lv.exchanges()) == 2
+		return len(lv.exchanges()) == 1
 	})
 
 	a.tv.QueueUpdate(func() { lv.step(true) })
-	var cursor string
+	var f proxy.Flow
 	waitFor(t, a, 5*time.Second, func() bool {
-		cursor = lv.cursor
-		return cursor != ""
+		got, ok := lv.selectedFlow()
+		f = got
+		return ok
 	})
-	if !strings.HasPrefix(cursor, "req-") {
-		t.Errorf("the first step selected %q, want the request", cursor)
+	if !strings.Contains(f.URL, "login") || f.Status != 200 {
+		t.Errorf("the selected row does not carry the whole exchange: %q %d", f.URL, f.Status)
 	}
 }

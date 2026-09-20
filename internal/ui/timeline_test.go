@@ -27,14 +27,14 @@ func TestTimelineInterleavesByTime(t *testing.T) {
 	for _, e := range tl.all() {
 		got = append(got, e.at.Format("15:04:05.000"))
 	}
-	want := []string{"12:04:01.220", "12:04:01.244", "12:04:01.390", "12:04:01.402"}
+	// the exchange sits at the time its request went out, between the two log lines
+	want := []string{"12:04:01.220", "12:04:01.244", "12:04:01.402"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("order = %v, want %v", got, want)
 	}
-	// the log line that follows the response must come after it, not before
 	all := tl.all()
-	if all[2].kind != entryResponse || all[3].kind != entryLog {
-		t.Errorf("the response and the log after it are out of order: %v %v", all[2].kind, all[3].kind)
+	if all[0].kind != entryLog || all[1].kind != entryExchange || all[2].kind != entryLog {
+		t.Errorf("the exchange did not land between the log lines: %v %v %v", all[0].kind, all[1].kind, all[2].kind)
 	}
 }
 
@@ -93,28 +93,33 @@ func TestFlowBecomesRequestThenResponse(t *testing.T) {
 	done.Done, done.Status, done.Duration = true, 200, 50*time.Millisecond
 	tl.setFlows([]proxy.Flow{done})
 	all := tl.all()
-	if len(all) != 2 {
-		t.Fatalf("a finished flow produced %d entries, want 2", len(all))
+	if len(all) != 1 {
+		t.Fatalf("a finished flow produced %d entries, want the one line it started as", len(all))
 	}
-	if all[0].kind != entryRequest || all[1].kind != entryResponse {
-		t.Errorf("kinds = %v %v", all[0].kind, all[1].kind)
+	// finishing fills the line in where it already was rather than adding a second one
+	if all[0].kind != entryExchange || !all[0].flow.Done || all[0].flow.Status != 200 {
+		t.Errorf("the line did not gain its response: kind=%v done=%v status=%d",
+			all[0].kind, all[0].flow.Done, all[0].flow.Status)
+	}
+	if !all[0].at.Equal(running.Start) {
+		t.Errorf("finishing moved the line off its request time: %v", all[0].at)
 	}
 
 	tl.setFlows([]proxy.Flow{done}) // polled again after finishing
-	if n := len(tl.all()); n != 2 {
+	if n := len(tl.all()); n != 1 {
 		t.Errorf("a finished flow was added again: %d entries", n)
 	}
 }
 
-// A filter that kept a request but dropped its response would leave the reader with half an exchange.
-func TestFilterKeepsBothHalvesOfAnExchange(t *testing.T) {
+// A filter has to match an exchange on either half: the url is in the request, the status in the
+// response, and a reader typing either means the same line.
+func TestFilterMatchesAnExchangeOnEitherHalf(t *testing.T) {
 	f := proxy.Flow{Method: "POST", URL: "https://api.example.com/v1/login", Host: "api.example.com", Status: 200, Done: true}
-	req := entry{kind: entryRequest, flow: f}
-	resp := entry{kind: entryResponse, flow: f}
-	if !req.matches("login") || !resp.matches("login") {
-		t.Error("a filter matching the url dropped one half of the exchange")
+	ex := entry{kind: entryExchange, flow: f}
+	if !ex.matches("login") {
+		t.Error("a filter matching the url dropped the exchange")
 	}
-	if req.matches("nothing-here") {
+	if ex.matches("nothing-here") {
 		t.Error("a filter that matches nothing kept the row")
 	}
 }
@@ -160,16 +165,21 @@ func TestOpeningAnExchangeShowsHeadersThenBody(t *testing.T) {
 		ReqSize:    14,
 		RespSize:   15,
 	}
-	req := entry{kind: entryRequest, flow: f, at: f.Start}
-	resp := entry{kind: entryResponse, flow: f, at: f.Start.Add(f.Duration)}
+	ex := entry{kind: entryExchange, flow: f, at: f.Start}
 
-	line := req.render("", detailLine)
+	line := ex.render("", detailLine)
 	if strings.Contains(line, "Authorization") {
 		t.Error("the one-line form is showing headers")
 	}
+	// the summary carries both halves: the call and what came back
+	for _, want := range []string{"POST", "api.example.com", "200", "20ms"} {
+		if !plainContains(line, want) {
+			t.Errorf("the one-line summary is missing %q: %q", want, plainRow(line))
+		}
+	}
 
-	headers := req.render("", detailHeaders)
-	for _, want := range []string{"Authorization", "Bearer abc123", "Content-Type"} {
+	headers := ex.render("", detailHeaders)
+	for _, want := range []string{"REQUEST", "RESPONSE", "Authorization", "Bearer abc123", "Content-Type"} {
 		if !strings.Contains(headers, want) {
 			t.Errorf("opened headers are missing %q:\n%s", want, headers)
 		}
@@ -178,19 +188,18 @@ func TestOpeningAnExchangeShowsHeadersThenBody(t *testing.T) {
 		t.Error("the headers level is already showing the body")
 	}
 
-	body := req.render("", detailBody)
+	body := ex.render("", detailBody)
+	// one line opens to both bodies, so the reader sees what was sent and what came back together
 	if !strings.Contains(body, `"user": "kim"`) {
-		t.Errorf("the opened body is not pretty-printed:\n%s", body)
+		t.Errorf("the request body is missing or not pretty-printed:\n%s", body)
 	}
+	if !strings.Contains(body, `"token": "xyz"`) {
+		t.Errorf("the response body is missing:\n%s", body)
+	}
+}
 
-	// the response half shows its own headers and body, not the request's
-	rb := resp.render("", detailBody)
-	if strings.Contains(rb, "Authorization") {
-		t.Error("the response is showing the request's headers")
-	}
-	if !strings.Contains(rb, `"token": "xyz"`) {
-		t.Errorf("the response body is missing:\n%s", rb)
-	}
+func plainContains(rendered, want string) bool {
+	return strings.Contains(plainRow(rendered), want)
 }
 
 // detail cycles and comes back round, so one key can both open and close.
@@ -210,8 +219,8 @@ func TestDetailCycles(t *testing.T) {
 // A tunnel has no headers or body to show; opening it must not print an empty block as if it did.
 func TestTunnelHasNothingToOpen(t *testing.T) {
 	f := proxy.Flow{Kind: proxy.KindTunnel, Method: "CONNECT", Host: "pinned.example.com:443", Done: true, Error: "pinned"}
-	resp := entry{kind: entryResponse, flow: f, at: time.Now()}
-	if strings.Contains(resp.render("", detailBody), "no headers") {
-		t.Error("a tunnel response printed a header block")
+	ex := entry{kind: entryExchange, flow: f, at: time.Now()}
+	if strings.Contains(ex.render("", detailBody), "RESPONSE") {
+		t.Error("a tunnel printed a response block it never read")
 	}
 }

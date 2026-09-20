@@ -106,7 +106,7 @@ func (v *logsView) Hints() []hint {
 		return append(append(hints, groupBreak), layers...)
 	}
 	return append(append(hints, groupBreak,
-		hint{"n", "next exchange"}, hint{"shift+n", "previous"}, hint{"o", "open headers, then body"},
+		hint{"up/down", "step exchanges"}, hint{"o", "open headers, then body"},
 		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"e", "open in $EDITOR"},
 		groupBreak),
 		append(layers, hint{"ctrl+k", "stop capture"})...)
@@ -238,17 +238,13 @@ func (v *logsView) exchanges() []entry {
 	return out
 }
 
-// entryID names one row so a region can point at it: an exchange is identified by its flow and
-// which half it is, since a request and its response are separate rows.
+// entryID names one row so a region can point at it. A log line has no id: only exchanges are
+// stepped between and opened.
 func entryID(e entry) string {
 	if e.kind == entryLog {
 		return ""
 	}
-	half := "req"
-	if e.kind == entryResponse {
-		half = "resp"
-	}
-	return fmt.Sprintf("%s-%d", half, e.flow.ID)
+	return fmt.Sprintf("ex-%d", e.flow.ID)
 }
 
 // selectedFlow is the exchange the cursor is on.
@@ -284,17 +280,8 @@ func (v *logsView) step(forward bool) {
 	}
 	switch {
 	case at < 0:
-		// nothing selected yet: start at the newest exchange, on its request rather than its
-		// response, because a reader wants the call and the response sits on the next line anyway
+		// nothing selected yet: start at the newest exchange, which is the one arriving now
 		at = len(ex) - 1
-		if ex[at].kind == entryResponse {
-			for i := at - 1; i >= 0; i-- {
-				if ex[i].kind == entryRequest && ex[i].flow.ID == ex[at].flow.ID {
-					at = i
-					break
-				}
-			}
-		}
 	case forward:
 		at = min(at+1, len(ex)-1)
 	default:
@@ -669,6 +656,18 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.readSelected(true)
 	default:
 		switch ev.Key() {
+		case tcell.KeyDown:
+			// the arrows step exchanges while there are any; with the traffic off they scroll, which
+			// is all a plain log has to move through
+			if v.mixing() {
+				v.step(true)
+				return nil
+			}
+		case tcell.KeyUp:
+			if v.mixing() {
+				v.step(false)
+				return nil
+			}
 		case tcell.KeyEnter:
 			if v.mixing() {
 				v.readSelected(false)

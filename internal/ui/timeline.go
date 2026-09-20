@@ -48,13 +48,12 @@ type entryKind int
 
 const (
 	entryLog entryKind = iota
-	entryRequest
-	entryResponse
+	entryExchange
 )
 
-// entry is one line of the merged view: a log line, or one end of an exchange. Requests and
-// responses are separate entries because they happen at different times, and what a reader wants to
-// see is what the app logged in between.
+// entry is one line of the merged view: a log line, or a whole exchange. An exchange sits at the
+// time its request went out, which is where it belongs among the log lines around it, and the same
+// line gains its status and timing once the response arrives.
 type entry struct {
 	at   time.Time
 	kind entryKind
@@ -110,12 +109,22 @@ func (t *timeline) setFlows(flows []proxy.Flow) {
 			continue
 		}
 		if t.seen[f.ID] == 0 {
-			t.push(entry{at: f.Start, kind: entryRequest, flow: f})
-		}
-		if f.Done {
-			t.push(entry{at: f.Start.Add(f.Duration), kind: entryResponse, flow: f})
+			t.push(entry{at: f.Start, kind: entryExchange, flow: f})
+		} else {
+			// the line is already on the timeline at its request time; finishing only fills it in
+			t.update(f)
 		}
 		t.seen[f.ID] = state
+	}
+}
+
+// update replaces a flow already on the timeline, leaving it where its request put it.
+func (t *timeline) update(f proxy.Flow) {
+	for i := range t.entries {
+		if t.entries[i].kind == entryExchange && t.entries[i].flow.ID == f.ID {
+			t.entries[i].flow = f
+			return
+		}
 	}
 }
 
@@ -196,21 +205,47 @@ func stripLogTime(line string) string {
 // headers and body when the reader has opened it.
 func (e entry) render(filter string, d detail) string {
 	stamp := fmt.Sprintf("[gray]%s[-]", e.at.Format("15:04:05.000"))
-	switch e.kind {
-	case entryRequest:
-		head := fmt.Sprintf("%s  [aqua]→[-] %s %s%s",
-			stamp, highlight(e.flow.Method, filter), highlight(requestLabel(e.flow), filter), senderNote(e.flow))
-		return head + detailBlock(d, e.flow.ReqHeader, e.flow.ReqBody, e.flow.ReqSize, e.flow.ReqTruncated)
-	case entryResponse:
-		head := fmt.Sprintf("%s  %s %s %s %s",
-			stamp, responseArrow(e.flow), statusCell(e.flow),
-			proxy.SizeString(e.flow.RespSize), responseNote(e.flow))
-		if e.flow.Kind == proxy.KindTunnel {
-			return head
-		}
-		return head + detailBlock(d, e.flow.RespHeader, e.flow.RespBody, e.flow.RespSize, e.flow.RespTruncated)
+	if e.kind == entryLog {
+		return fmt.Sprintf("%s  %s", stamp, highlight(stripLogTime(e.text), filter))
 	}
-	return fmt.Sprintf("%s  %s", stamp, highlight(stripLogTime(e.text), filter))
+	head := fmt.Sprintf("%s  %s %s %s%s%s",
+		stamp, outcomeCell(e.flow), highlight(e.flow.Method, filter),
+		highlight(requestLabel(e.flow), filter), sizeAndTiming(e.flow), senderNote(e.flow))
+	if d == detailLine {
+		return head
+	}
+	var b strings.Builder
+	b.WriteString(head)
+	fmt.Fprintf(&b, "\n%s[aqua]REQUEST[-]", detailIndent)
+	b.WriteString(detailBlock(d, e.flow.ReqHeader, e.flow.ReqBody, e.flow.ReqSize, e.flow.ReqTruncated))
+	if e.flow.Kind == proxy.KindTunnel {
+		return b.String()
+	}
+	fmt.Fprintf(&b, "\n%s[aqua]RESPONSE[-]", detailIndent)
+	b.WriteString(detailBlock(d, e.flow.RespHeader, e.flow.RespBody, e.flow.RespSize, e.flow.RespTruncated))
+	return b.String()
+}
+
+// outcomeCell is the status once there is one, and a marker while the call is still out.
+func outcomeCell(f proxy.Flow) string {
+	if !f.Done {
+		return "[gray]...[-]"
+	}
+	if f.Error != "" {
+		return "[red]err[-]"
+	}
+	return statusCell(f)
+}
+
+// sizeAndTiming is what the response added to the line, left off while the call is still out.
+func sizeAndTiming(f proxy.Flow) string {
+	if !f.Done {
+		return ""
+	}
+	if f.Error != "" {
+		return "  [red]" + tview.Escape(f.Error) + "[-]"
+	}
+	return fmt.Sprintf("  [gray]%s %dms[-]", proxy.SizeString(f.RespSize), f.Duration.Milliseconds())
 }
 
 // detailIndent lines the opened text up under the summary rather than against the left edge, so the
