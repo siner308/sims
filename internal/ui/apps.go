@@ -189,16 +189,12 @@ func (v *appsView) watchWithApp() {
 	if !ok {
 		// with nothing selected there is no log to narrow, so this is the device's own mixed view
 		withCapture(v.app, v.dev, func(s *capture.Session) {
-			logs := newLogsView(v.app, v.dev, nil)
-			logs.session = s
-			v.app.push(logs)
+			v.app.push(newTrafficView(v.app, v.dev, nil, s))
 		})
 		return
 	}
 	withCapture(v.app, v.dev, func(s *capture.Session) {
-		stream := newLogsView(v.app, v.dev, &app)
-		stream.session = s
-		v.app.push(stream)
+		v.app.push(newTrafficView(v.app, v.dev, &app, s))
 	})
 }
 

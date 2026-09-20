@@ -49,7 +49,7 @@ func WriteDeadJournalForTest(t *testing.T, dir string, d device.Device) {
 func SimulatorProcessNameForTest(p proxy.Process) string { return simulatorProcessName(p) }
 
 // NeedsHostProxyForTest exposes which devices borrow this machine's network settings.
-func NeedsHostProxyForTest(d device.Device) bool { return needsHostProxy(d) }
+func NeedsHostProxyForTest(d device.Device) bool { return NeedsHostProxy(d) }
 
 // JournalsForTest returns the in-flight records on disk.
 func JournalsForTest(dir string) []journal { return readJournals(dir) }

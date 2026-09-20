@@ -77,9 +77,9 @@ func TestAppLogMixesWithWholeDeviceTraffic(t *testing.T) {
 	}
 }
 
-// t on the apps list is the way in: one key from a chosen app to its log with the device's traffic
-// beside it. Before this the only route was l and then t.
-func TestAppsViewTOpensTheMixedView(t *testing.T) {
+// t on the apps list opens the device's traffic and remembers which app was chosen, so l adds that
+// app's log to the same stream rather than the whole device's.
+func TestAppsViewTOpensTheTrafficKeepingTheApp(t *testing.T) {
 	emu := emulator()
 	prov := &proxyProvider{fakeProvider: &fakeProvider{platform: device.PlatformAndroid, devices: []device.Device{emu}}}
 	a := New("test", sims.New(prov))
@@ -121,9 +121,9 @@ func TestAppsViewTOpensTheMixedView(t *testing.T) {
 		return lv != nil && lv.mixing()
 	})
 	if lv.only == nil {
-		t.Error("t opened a device-wide log instead of the selected app's")
+		t.Error("t forgot the selected app, so l would open the whole device's log")
 	}
-	if lv.Name() != "logs+traffic" {
-		t.Errorf("view = %q", lv.Name())
+	if lv.Name() != "traffic" {
+		t.Errorf("view = %q; t opens the traffic layer alone", lv.Name())
 	}
 }

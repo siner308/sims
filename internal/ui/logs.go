@@ -58,6 +58,14 @@ type logsView struct {
 	opened map[string]detail
 }
 
+// newTrafficView opens the same stream on its traffic layer, with the log off until l adds it.
+func newTrafficView(a *App, d device.Device, only *device.App, s *capture.Session) *logsView {
+	v := newLogsView(a, d, only)
+	v.session = s
+	v.logOff = true
+	return v
+}
+
 func newLogsView(a *App, d device.Device, only *device.App) *logsView {
 	v := &logsView{app: a, dev: d, only: only, opened: map[string]detail{}}
 	v.text = tview.NewTextView().SetDynamicColors(true).SetScrollable(true).SetMaxLines(logBuffer)

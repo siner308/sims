@@ -64,11 +64,6 @@ func (v *flowsView) Hints() []hint {
 	}
 }
 
-// needsHostProxy mirrors the capture package: only an iOS simulator borrows this machine's settings.
-func needsHostProxy(d device.Device) bool {
-	return d.Platform == device.PlatformIOS && d.Kind == device.KindVirtual
-}
-
 func (v *flowsView) Refresh() {
 	if v.closed {
 		return
@@ -505,7 +500,10 @@ func (v *flowsView) stopCapture() {
 }
 
 func stopNote(d device.Device) string {
-	if needsHostProxy(d) {
+	if d.IsHost() {
+		return "This Mac goes back to its own network settings. The certificate stays trusted, so the next capture needs no setup."
+	}
+	if capture.NeedsHostProxy(d) {
 		return "The simulator and this Mac go back to their own network settings. The certificate stays trusted, so the next capture needs no setup."
 	}
 	return "The device stops sending its traffic here. The certificate stays installed, so the next capture needs no setup."

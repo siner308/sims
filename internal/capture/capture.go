@@ -145,7 +145,7 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 			Detail: fmt.Sprintf("the proxy is reachable at %s:%d for as long as this runs, by anything on the same network", target.Host, port),
 		})
 	}
-	if needsHostProxy(d) {
+	if NeedsHostProxy(d) {
 		if !hostProxySupported() {
 			s.Stop()
 			return nil, errors.New("a simulator follows this machine's proxy settings, which sims can only change on macOS")
@@ -211,9 +211,9 @@ func (s *Session) writeJournal() {
 	_ = writeJournal(s.certDir, j)
 }
 
-// needsHostProxy reports whether the device borrows this machine's network settings. An iOS
+// NeedsHostProxy reports whether the device borrows this machine's network settings. An iOS
 // simulator does, and so does the machine itself; an Android emulator has its own.
-func needsHostProxy(d device.Device) bool {
+func NeedsHostProxy(d device.Device) bool {
 	if d.IsHost() {
 		return true
 	}
@@ -230,7 +230,7 @@ func (s *Session) target(ctx context.Context, d device.Device, ca *proxy.CA, o O
 		Signer:    ca,
 	}
 	switch {
-	case needsHostProxy(d):
+	case NeedsHostProxy(d):
 		t.Host = "127.0.0.1"
 	case d.Platform == device.PlatformAndroid && d.Kind == device.KindVirtual:
 		t.Host = androidEmulatorHost
@@ -273,7 +273,7 @@ func (s *Session) attribute(ctx context.Context, clientAddr string) proxy.Attrib
 		// the app on this machine is the device here, so its name is what the table should show
 		return s.decide(proxy.Attribution{Label: p.Name, Origin: proxy.OriginDevice})
 	}
-	if needsHostProxy(s.Device) && isSimulatorProcess(p) {
+	if NeedsHostProxy(s.Device) && isSimulatorProcess(p) {
 		// a simulator's apps run as host processes, so lsof names the one that opened the
 		// connection; keeping that name is what lets a row say more than "the simulator"
 		return s.decide(proxy.Attribution{Label: simulatorProcessName(p), Origin: proxy.OriginDevice})

@@ -448,10 +448,7 @@ func (v *devicesView) watchTraffic() {
 	// t opens the stream with the traffic layer on and the log off; l inside it adds the log. The
 	// table is a different way of reading the same capture, reached with shift+t.
 	withCapture(v.app, d, func(s *capture.Session) {
-		stream := newLogsView(v.app, d, nil)
-		stream.session = s
-		stream.logOff = true
-		v.app.push(stream)
+		v.app.push(newTrafficView(v.app, d, nil, s))
 	})
 }
 
@@ -492,7 +489,7 @@ func captureNote(d device.Device) string {
 		return "sims points this machine's web proxy at itself while the capture runs,\n" +
 			"so every app here goes through it and each row is named by the process behind it.\n" +
 			"Opening HTTPS also needs the certificate trusted: sims proxy ca localhost --install."
-	case needsHostProxy(d):
+	case capture.NeedsHostProxy(d):
 		return "sims trusts its certificate on the simulator, and points this Mac's web proxy at itself\n" +
 			"while the capture runs. Other apps on the Mac keep working: their traffic is relayed\n" +
 			"untouched and is not captured. Everything goes back when you stop."
