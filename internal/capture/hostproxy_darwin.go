@@ -97,11 +97,11 @@ func readHostProxy(ctx context.Context, service, kind string) (netsetupState, er
 // treated as wreckage once repeated attempts are refused outright: a connection refused means
 // nothing is listening, while a timeout or a permission error means a local firewall or a proxy
 // that is merely slow to restart, and those keep the user's setting.
-func isAbandonedCaptureProxy(st netsetupState, knownDeadPorts []int) bool {
+func isAbandonedCaptureProxy(st netsetupState, captureOwnedPorts []int) bool {
 	if !isLoopbackHost(st.server) {
 		return false
 	}
-	if slices.Contains(knownDeadPorts, st.port) {
+	if slices.Contains(captureOwnedPorts, st.port) {
 		return true
 	}
 	addr := net.JoinHostPort(st.server, strconv.Itoa(st.port))
@@ -135,7 +135,7 @@ func isLoopbackHost(server string) bool {
 // read records what the machine's proxy settings are now, before anything is changed. It is
 // separate from apply so the caller can persist the record first: a process killed between changing
 // a setting and writing it down leaves a machine nobody can put back.
-func (h *hostProxy) read(ctx context.Context, knownDeadPorts []int) error {
+func (h *hostProxy) read(ctx context.Context, captureOwnedPorts []int) error {
 	service, err := activeService(ctx)
 	if err != nil {
 		return err
@@ -146,10 +146,10 @@ func (h *hostProxy) read(ctx context.Context, knownDeadPorts []int) error {
 		if err != nil {
 			return err
 		}
-		// A capture that died without restoring leaves the machine pointing at a loopback port that
-		// no longer listens. Putting that back would hand the dead proxy straight to the user, so
-		// it is recorded as "was off" instead.
-		if st.enabled && isAbandonedCaptureProxy(st, knownDeadPorts) {
+		// A setting pointing at a capture's own port is never what the user had: either the capture
+		// died without restoring, or one is running right now and will clear the setting itself.
+		// Recording it as theirs would put a proxy back that by then has stopped listening.
+		if st.enabled && isAbandonedCaptureProxy(st, captureOwnedPorts) {
 			st.enabled, st.server, st.port = false, "", 0
 		}
 		before = append(before, st)

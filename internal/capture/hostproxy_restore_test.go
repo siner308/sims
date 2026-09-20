@@ -2,7 +2,9 @@ package capture
 
 import (
 	"net"
+	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -95,6 +97,13 @@ func TestDeadLoopbackProxyIsNotRestored(t *testing.T) {
 		t.Error("a listening loopback proxy was taken for a dead one")
 	}
 
+	// a capture running right now owns its port, and a second capture starting must not record it
+	// as what the user had: the first one clears the setting when it stops, and putting that port
+	// back afterwards points the machine at a proxy that is gone, which takes its network with it
+	if !isAbandonedCaptureProxy(live, []int{live.port}) {
+		t.Error("a running capture's own proxy was recorded as the user's own setting")
+	}
+
 	// a proxy somewhere else on the network is never guessed at
 	remote := netsetupState{kind: "webproxy", enabled: true, server: "proxy.corp.example", port: 8080}
 	if isAbandonedCaptureProxy(remote, nil) {
@@ -176,5 +185,36 @@ func TestStartDoesNotAdoptADeadProxyAsTheOriginal(t *testing.T) {
 		if st.enabled {
 			t.Errorf("%s was restored to the dead proxy %s:%d instead of being cleared", kind, st.server, st.port)
 		}
+	}
+}
+
+// A second capture starting while one is already running has to treat the running one's port as
+// the tool's own, not as the user's setting. Reading only the dead ports left the live one looking
+// like something to preserve, and restoring it later pointed the machine at a proxy that had since
+// stopped, which is a machine with no working network.
+func TestARunningCapturesPortIsNotTakenForTheUsers(t *testing.T) {
+	dir := t.TempDir()
+	// one capture running under this very process, and one that died
+	if err := writeJournal(dir, journal{PID: os.Getpid(), Port: 51000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJournal(dir, journal{PID: 999999, Port: 51001}); err != nil {
+		t.Fatal(err)
+	}
+
+	owned := captureProxyPorts(dir)
+	for _, want := range []int{51000, 51001} {
+		if !slices.Contains(owned, want) {
+			t.Errorf("port %d is a capture's own and was not listed: %v", want, owned)
+		}
+	}
+
+	// the dead-only list is what the old code passed, and it is where the live port went missing
+	dead := deadCapturePorts(dir)
+	if slices.Contains(dead, 51000) {
+		t.Error("a running capture's port was listed as dead")
+	}
+	if !slices.Contains(dead, 51001) {
+		t.Errorf("the dead capture's port is missing: %v", dead)
 	}
 }

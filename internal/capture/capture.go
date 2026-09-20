@@ -152,7 +152,7 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 		}
 		// read and write the record down before changing anything: a process killed between the
 		// change and the record leaves a machine with no way back
-		if err := s.host.read(ctx, deadCapturePorts(dir)); err != nil {
+		if err := s.host.read(ctx, captureProxyPorts(dir)); err != nil {
 			s.Stop()
 			return nil, err
 		}
@@ -191,6 +191,20 @@ func deadCapturePorts(dir string) []int {
 	var ports []int
 	for _, j := range readJournals(dir) {
 		if j.Port > 0 && (j.PID <= 0 || !processAlive(j.PID)) {
+			ports = append(ports, j.Port)
+		}
+	}
+	return ports
+}
+
+// captureProxyPorts are the ports every capture recorded, running or not. A setting pointing at one
+// of them was put there by this tool, so it must not be recorded as what the user had before: the
+// capture that owns it will clear it on its way out, and putting it back afterwards would leave the
+// machine pointing at a proxy that has since stopped.
+func captureProxyPorts(dir string) []int {
+	var ports []int
+	for _, j := range readJournals(dir) {
+		if j.Port > 0 {
 			ports = append(ports, j.Port)
 		}
 	}
