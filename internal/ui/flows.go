@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,7 +39,9 @@ type flowsView struct {
 	byDomain bool
 	// collapsed holds the domains folded shut while grouped; a domain absent from it is open.
 	collapsed map[string]bool
-	stop      chan struct{}
+	// closed is set once the view leaves the stack, so a late Refresh does not revive its follower.
+	closed bool
+	stop   chan struct{}
 }
 
 func newFlowsView(a *App, d device.Device, s *capture.Session) *flowsView {
@@ -67,6 +70,9 @@ func needsHostProxy(d device.Device) bool {
 }
 
 func (v *flowsView) Refresh() {
+	if v.closed {
+		return
+	}
 	v.reload()
 	if v.stop == nil {
 		v.watch()
@@ -107,6 +113,7 @@ func (v *flowsView) watch() {
 // close stops following the store. Whatever takes the view off the stack calls it, and esc calls it
 // on the way out, so it has to be safe more than once.
 func (v *flowsView) close() {
+	v.closed = true
 	if v.stop != nil {
 		close(v.stop)
 		v.stop = nil
@@ -330,14 +337,18 @@ func statusCell(f proxy.Flow) string {
 	return fmt.Sprintf("%s%d[-]", color, f.Status)
 }
 
+// hostOf is the host without the port the scheme implies. An IPv6 address is full of colons, so the
+// split has to be done properly rather than by scanning for the last one: "fe80::443" is an address,
+// not a host with a port.
 func hostOf(f proxy.Flow) string {
-	host := f.Host
-	if i := strings.LastIndex(host, ":"); i > 0 && !strings.Contains(host[i:], "]") {
-		if host[i+1:] == "443" || host[i+1:] == "80" {
-			host = host[:i]
-		}
+	host, port, err := net.SplitHostPort(f.Host)
+	if err != nil {
+		return f.Host
 	}
-	return host
+	if port == "443" || port == "80" {
+		return host
+	}
+	return f.Host
 }
 
 func pathOf(f proxy.Flow) string {

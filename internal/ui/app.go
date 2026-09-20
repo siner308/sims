@@ -29,6 +29,20 @@ type view interface {
 // Whatever takes the view off the stack closes it, so nothing keeps redrawing a page that is gone.
 type closer interface{ close() }
 
+// pageKeyer is a view whose displayed name changes while it is open. The page registry is keyed on
+// a name, so a view that renames itself would be removed under a key it was never added under and
+// its widget would stay registered for the life of the process.
+type pageKeyer interface{ pageKey() string }
+
+// pageKey is the registry key for a view: a fixed identifier where the view has one, its name
+// otherwise.
+func pageKey(v view) string {
+	if k, ok := v.(pageKeyer); ok {
+		return k.pageKey()
+	}
+	return v.Name()
+}
+
 func closeView(v view) {
 	if c, ok := v.(closer); ok {
 		c.close()
@@ -183,7 +197,7 @@ func (a *App) runUpdate() {
 
 func (a *App) push(v view) {
 	a.stack = append(a.stack, v)
-	a.body.AddAndSwitchToPage(v.Name(), v.Primitive(), true)
+	a.body.AddAndSwitchToPage(pageKey(v), v.Primitive(), true)
 	a.tv.SetFocus(v.Primitive())
 	a.drawHeader()
 	v.Refresh()
@@ -196,9 +210,9 @@ func (a *App) pop() {
 	top := a.stack[len(a.stack)-1]
 	a.stack = a.stack[:len(a.stack)-1]
 	closeView(top)
-	a.body.RemovePage(top.Name())
+	a.body.RemovePage(pageKey(top))
 	cur := a.top()
-	a.body.SwitchToPage(cur.Name())
+	a.body.SwitchToPage(pageKey(cur))
 	a.tv.SetFocus(cur.Primitive())
 	a.drawHeader()
 	cur.Refresh()
@@ -211,7 +225,7 @@ func (a *App) replaceTop(v view) {
 		old := a.stack[len(a.stack)-1]
 		a.stack = a.stack[:len(a.stack)-1]
 		closeView(old)
-		a.body.RemovePage(old.Name())
+		a.body.RemovePage(pageKey(old))
 	}
 	a.push(v)
 }
@@ -294,11 +308,11 @@ func (a *App) onCommand(key tcell.Key) {
 		}
 		a.stack = a.stack[:1]
 		for _, name := range a.body.GetPageNames(false) {
-			if name != a.stack[0].Name() {
+			if name != pageKey(a.stack[0]) {
 				a.body.RemovePage(name)
 			}
 		}
-		a.body.SwitchToPage(a.stack[0].Name())
+		a.body.SwitchToPage(pageKey(a.stack[0]))
 		a.tv.SetFocus(a.stack[0].Primitive())
 		a.drawHeader()
 		a.stack[0].Refresh()
@@ -460,6 +474,7 @@ func (a *App) stopSpinner() {
 	close(a.spinStop)
 	a.spinStop = nil
 	a.spinMsg = ""
+	// a job finishing takes the runner down but must not take a message with it
 	a.setStatus("")
 }
 
@@ -479,8 +494,18 @@ func (a *App) flash(msg string) {
 	}()
 }
 
+// flashErr shows a failure. It holds the message the way flash does, because any background job
+// finishing afterwards clears the status line, and an error that vanishes leaves the user thinking
+// the key did nothing. clearStatus is how a caller wipes it deliberately.
 func (a *App) flashErr(err error) {
+	a.flashText, a.flashUntil = err.Error(), time.Now().Add(6*time.Second)
 	a.setStatus(" [red]" + tview.Escape(err.Error()) + "[-]")
+}
+
+// clearStatus empties the status line and drops whatever was being held there.
+func (a *App) clearStatus() {
+	a.flashText, a.flashUntil = "", time.Time{}
+	a.setStatus("")
 }
 
 // work must not touch tview; only then runs on the UI goroutine. Whatever the caller just put in

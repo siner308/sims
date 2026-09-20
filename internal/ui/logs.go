@@ -48,6 +48,8 @@ type logsView struct {
 	cursor string
 	// warnedDeviceWide keeps the "traffic is the whole device" notice to once per view.
 	warnedDeviceWide bool
+	// closed is set once the view leaves the stack, so a late Refresh does not revive it.
+	closed bool
 	// opened says how much of each exchange is shown; the cursor's own level is kept separately so
 	// opening one does not open every one.
 	opened map[string]detail
@@ -73,6 +75,10 @@ func (v *logsView) Name() string {
 	return "logs"
 }
 
+// pageKey stays put while Name changes with t, so the page is removed under the key it was added
+// under rather than left registered for good.
+func (v *logsView) pageKey() string { return "logs" }
+
 func (v *logsView) Primitive() tview.Primitive { return v.text }
 
 func (v *logsView) Hints() []hint {
@@ -87,8 +93,11 @@ func (v *logsView) Hints() []hint {
 	return append(hints, groupBreak, hint{"t", "mix in traffic"})
 }
 
-// close stops the log stream and the traffic follower; whatever takes the view off the stack calls it.
+// close stops the log stream and the traffic follower; whatever takes the view off the stack calls
+// it. A closed view stays closed: a Refresh queued before it left the stack would otherwise start
+// both goroutines again, on a page nobody can see, for the life of the process.
 func (v *logsView) close() {
+	v.closed = true
 	v.stop()
 	v.unwatchTraffic()
 }
@@ -304,6 +313,9 @@ func (v *logsView) visibleEntries() []entry {
 }
 
 func (v *logsView) Refresh() {
+	if v.closed {
+		return
+	}
 	if v.mixing() {
 		if v.timeline == nil {
 			v.timeline = newTimeline(logBuffer)
@@ -527,6 +539,9 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		if v.mixing() {
 			v.timeline.clear()
 			v.session.Store.Clear()
+			// the exchanges are gone, so what was opened and where the cursor sat are too
+			v.opened = map[string]detail{}
+			v.cursor = ""
 		}
 		v.text.Clear()
 	case 'p':

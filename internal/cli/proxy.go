@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -99,7 +101,10 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 	fmt.Fprintln(c.Err, "   press ctrl+c to stop and put everything back")
 
 	if !o.quiet {
-		session.Store.OnDone(func(f proxy.Flow) { c.printFlow(f) })
+		// the store calls this from one goroutine per proxied connection, so the writer is shared:
+		// without a lock the lines interleave and whole records are lost
+		w := &flowWriter{out: c.Out, json: c.json}
+		session.Store.OnDone(w.write)
 	}
 
 	// SIGTERM too: a capture killed by a script or a shell going away must still put the device and
@@ -136,13 +141,43 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 	return nil
 }
 
-// printFlow writes one line per exchange, or the whole record with --json.
-func (c *cli) printFlow(f proxy.Flow) {
-	if c.json {
-		enc := json.NewEncoder(c.Out)
-		_ = enc.Encode(f)
+// flowWriter serialises what the proxy reports. Flows complete on many goroutines at once, and a
+// caller reading --json as one record per line gets a short, silently truncated set otherwise.
+type flowWriter struct {
+	mu   sync.Mutex
+	out  io.Writer
+	json bool
+	enc  *json.Encoder
+	// failed is the first write error, kept so a broken pipe is reported once rather than per flow.
+	failed error
+}
+
+func (w *flowWriter) write(f proxy.Flow) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.failed != nil {
 		return
 	}
+	if w.json {
+		if w.enc == nil {
+			w.enc = json.NewEncoder(w.out)
+		}
+		w.failed = w.enc.Encode(f)
+		return
+	}
+	_, w.failed = io.WriteString(w.out, flowLine(f))
+}
+
+// Err is the first write failure, so the command can exit non-zero rather than look like it wrote
+// everything.
+func (w *flowWriter) Err() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.failed
+}
+
+// flowLine is the one-line human form of an exchange.
+func flowLine(f proxy.Flow) string {
 	status := fmt.Sprint(f.Status)
 	switch {
 	case f.Kind == proxy.KindTunnel:
@@ -158,7 +193,7 @@ func (c *cli) printFlow(f proxy.Flow) {
 	if f.Error != "" {
 		note = "  " + f.Error
 	}
-	fmt.Fprintf(c.Out, "%-6s %-6s %-9s %s%s%s\n",
+	return fmt.Sprintf("%-6s %-6s %-9s %s%s%s\n",
 		f.Method, status, proxy.SizeString(f.RespSize), f.URL, origin, note)
 }
 

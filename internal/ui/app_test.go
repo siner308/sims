@@ -1080,7 +1080,8 @@ func TestStatus_LongErrorWraps(t *testing.T) {
 	if rows < 3 || height != rows {
 		t.Errorf("status rows=%d height=%d for a %d-char message on an 80-col screen", rows, height, len(long))
 	}
-	onUI(a, func() { a.setStatus("") })
+	// an error is held so a finishing job cannot wipe it; clearing it deliberately still works
+	onUI(a, func() { a.clearStatus() })
 	onUI(a, func() { rows = a.statusRows })
 	if rows != 1 {
 		t.Errorf("clearing should shrink the status back to one row, got %d", rows)

@@ -160,3 +160,23 @@ func TestEnterOnADomainFoldsIt(t *testing.T) {
 		t.Error("enter on a domain heading opened a flow")
 	}
 }
+
+// An IPv6 address is full of colons, so trimming the port by scanning for the last one turns
+// "fe80::443" into "fe80:". That value is the domain grouping key and the fold-state key, so
+// distinct hosts collapse into one bucket.
+func TestHostOfHandlesIPv6(t *testing.T) {
+	cases := map[string]string{
+		"[fe80::1]:443":       "fe80::1",
+		"[2001:db8::80]:443":  "2001:db8::80",
+		"[fe80::1]:8443":      "[fe80::1]:8443",
+		"fe80::443":           "fe80::443",
+		"2001:db8::80":        "2001:db8::80",
+		"api.example.com:443": "api.example.com",
+		"api.example.com":     "api.example.com",
+	}
+	for in, want := range cases {
+		if got := hostOf(proxy.Flow{Host: in}); got != want {
+			t.Errorf("hostOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
