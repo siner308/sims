@@ -47,3 +47,9 @@ changelog:
 release:
   draft: false
   prerelease: auto
+  # the tag message says what the release is for; without this the notes are a list of commits and
+  # a reader has to infer it from thirty subject lines. The body leaves out the subject, which is
+  # the version and is already the title of the release.
+  header: |
+    {{ .TagBody }}
+
