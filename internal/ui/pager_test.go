@@ -58,9 +58,10 @@ func TestPagerRunsAndTheTUIComesBack(t *testing.T) {
 	}
 }
 
-// sims owns the terminal's alternate screen. A pager that opens its own leaves the TUI drawn over
-// it and the keyboard somewhere neither expects, which is what `q` walking into a dead screen looks
-// like. less is kept on the current screen for that reason.
+// Suspending the TUI leaves the terminal's alternate screen before the pager starts, so less takes
+// its own and puts back what was under it on exit. -X would hold it on the current screen instead
+// and leave its text there for the resumed TUI to draw over, which is what a dead black screen
+// after q looks like.
 func TestLessKeepsTheCurrentScreen(t *testing.T) {
 	t.Setenv("PAGER", "less")
 	name, args := viewerFor(false)
@@ -68,9 +69,12 @@ func TestLessKeepsTheCurrentScreen(t *testing.T) {
 		t.Fatalf("pager = %q", name)
 	}
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-X", "-R", "-F"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("less is missing %q: %v", want, args)
+	if !strings.Contains(joined, "-R") {
+		t.Errorf("less cannot pass colour through: %v", args)
+	}
+	for _, unwanted := range []string{"-X", "-F"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("less is run with %q, which stops it restoring the screen: %v", unwanted, args)
 		}
 	}
 

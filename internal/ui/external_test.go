@@ -3,6 +3,7 @@ package ui
 import (
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -98,5 +99,20 @@ func TestScratchFileHoldsTheExchange(t *testing.T) {
 	}
 	if !strings.HasSuffix(path, ".txt") {
 		t.Errorf("the file is not named for a text tool: %s", path)
+	}
+}
+
+// Reading an exchange has to work on a machine where EDITOR was never set, which is most of them.
+// Sending the reader off to configure a shell instead of opening the editor already installed is a
+// dead end at the moment they wanted to read something.
+func TestEditorFallsBackWhenNothingIsConfigured(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	name, _ := viewerFor(true)
+	if name == "" {
+		t.Fatal("e reports no editor even though the system has one")
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		t.Errorf("editor = %q, which is not installed: %v", name, err)
 	}
 }

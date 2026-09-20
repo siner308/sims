@@ -25,7 +25,8 @@ func (a *App) openExternally(title, body string, editor bool) {
 	}
 	name, args := viewerFor(editor)
 	if name == "" {
-		a.flashErr(fmt.Errorf("no %s is set; export PAGER or EDITOR", viewerVar(editor)))
+		a.flashErr(fmt.Errorf("no %s is set and none of %s is installed; put `export %s=<your editor>` in ~/.zshrc",
+			viewerVar(editor), strings.Join(fallbackEditors, ", "), viewerVar(editor)))
 		return
 	}
 	// Suspend blocks its caller for as long as the tool is open, and this runs from a key handler
@@ -52,6 +53,13 @@ func viewerFor(editor bool) (string, []string) {
 		if v := firstWord(os.Getenv("EDITOR")); v != "" {
 			return v, nil
 		}
+		// EDITOR is unset far more often than PAGER, and an error telling the reader to go and
+		// configure a shell is a worse answer than opening the editor every Unix already has
+		for _, name := range fallbackEditors {
+			if _, err := exec.LookPath(name); err == nil {
+				return name, nil
+			}
+		}
 		return "", nil
 	}
 	if v := os.Getenv("PAGER"); v != "" {
@@ -64,23 +72,24 @@ func viewerFor(editor bool) (string, []string) {
 	return "", nil
 }
 
-// pagerFlags adds what a pager needs to hand the screen back cleanly. sims already owns the
-// terminal's alternate screen, so a pager that opens its own leaves the TUI drawn over and the
-// keyboard somewhere neither of them expects. -X keeps less on the current screen, -R lets colour
-// through and -F exits at once for something that already fits. A pager the user configured with
-// its own flags is left alone.
+// pagerFlags adds what a pager needs to be readable here. Suspending the TUI leaves the terminal's
+// alternate screen first, so the pager is free to open its own and restore what was underneath on
+// the way out: -X would keep it on the current screen instead and leave its output behind for the
+// resumed TUI to draw over. -R lets colour through. A pager the user configured with its own flags
+// is left alone.
 func pagerFlags(name string, given []string) []string {
 	if len(given) > 0 {
 		return given
 	}
 	switch filepath.Base(name) {
 	case "less":
-		return []string{"-R", "-F", "-X"}
-	case "more":
-		return []string{"-e"}
+		return []string{"-R"}
 	}
 	return nil
 }
+
+// fallbackEditors are tried in order when neither VISUAL nor EDITOR is set, easiest first.
+var fallbackEditors = []string{"nano", "vim", "vi"}
 
 func viewerVar(editor bool) string {
 	if editor {
