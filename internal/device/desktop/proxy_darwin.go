@@ -2,11 +2,10 @@ package desktop
 
 import (
 	"context"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/siner308/sims/internal/device"
 )
@@ -68,40 +67,31 @@ func (p *Provider) TrustCert(ctx context.Context, certPEM []byte) error {
 	return nil
 }
 
-// trustedHere reports whether this certificate is already in the user's keychain, so a second
-// capture does not ask for the same password again.
+// trustedHere reports whether this Mac will actually trust the certificate, which is a different
+// question from whether it is in a keychain: a certificate whose trust was revoked in Keychain
+// Access is still there. Answering the easy question would suppress the install instruction and
+// leave every HTTPS exchange unopened with nothing on screen saying why.
 //
-// x509.SystemCertPool cannot answer this on macOS: it comes back with no subjects, because Go hands
-// verification to the platform instead of holding the roots itself. The keychain is asked directly.
+// x509.SystemCertPool cannot answer it either, since Go hands verification to the platform and the
+// pool comes back empty on macOS. `security verify-cert` is the platform asking itself.
 func trustedHere(certPEM []byte) bool {
-	block, _ := pem.Decode(certPEM)
-	if block == nil {
-		return false
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
+	f, err := os.CreateTemp("", "sims-trust-*.pem")
 	if err != nil {
 		return false
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	defer os.Remove(f.Name())
+	if _, err := f.Write(certPEM); err != nil {
+		f.Close()
 		return false
 	}
-	out, err := exec.Command("security", "find-certificate", "-a", "-p",
-		home+"/Library/Keychains/login.keychain-db").Output()
-	if err != nil {
+	if err := f.Close(); err != nil {
 		return false
 	}
-	rest := out
-	for {
-		var b *pem.Block
-		b, rest = pem.Decode(rest)
-		if b == nil {
-			return false
-		}
-		if have, err := x509.ParseCertificate(b.Bytes); err == nil && have.Equal(cert) {
-			return true
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// the basic policy asks whether the chain is trusted; the ssl policy adds a certificate
+	// transparency check that a private CA can never satisfy
+	return exec.CommandContext(ctx, "security", "verify-cert", "-c", f.Name(), "-p", "basic").Run() == nil
 }
 
 // ClearProxy leaves the certificate in place, the way the simulator path does: a capture the user

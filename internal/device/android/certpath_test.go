@@ -133,3 +133,39 @@ exit 0`)
 		t.Error("the certificate the instruction names was deleted again")
 	}
 }
+
+// adb root restarts adbd and drops the connection. Remounting before it is back fails with "device
+// not found", which silently routes the user to the manual path on a device where the system trust
+// store would have worked.
+func TestSystemCertInstallWaitsForTheDeviceToComeBack(t *testing.T) {
+	bin, calls := stubADB(t, `case "$*" in
+  *"settings get"*) echo "10.0.2.2:9090"; exit 0 ;;
+esac
+exit 0`)
+	p := android.NewWithADB(bin)
+
+	if _, err := p.SetProxy(t.Context(), testDevice(), testTarget(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	rootAt, waitAt, remountAt := -1, -1, -1
+	for i, c := range calls() {
+		switch {
+		case strings.HasSuffix(c, " root"):
+			rootAt = i
+		case strings.Contains(c, "wait-for-device"):
+			waitAt = i
+		case strings.HasSuffix(c, " remount"):
+			remountAt = i
+		}
+	}
+	if rootAt < 0 || remountAt < 0 {
+		t.Fatalf("the system store path was not taken: %v", calls())
+	}
+	if waitAt < 0 {
+		t.Fatalf("remount races the reconnect after adb root: %v", calls())
+	}
+	if rootAt >= waitAt || waitAt >= remountAt {
+		t.Errorf("the wait is not between root and remount: root=%d wait=%d remount=%d", rootAt, waitAt, remountAt)
+	}
+}

@@ -118,23 +118,23 @@ func TestCaptureAsksForTrustInsteadOfHanging(t *testing.T) {
 	}
 }
 
-// A certificate already in this Mac's login keychain must not produce the manual step again: a
-// second capture asking for the same password would look like a bug. The check has to read the
-// keychain, because x509.SystemCertPool is empty on macOS.
+// A certificate this Mac actually trusts must not ask to be installed again: a second capture
+// asking for the same password would look like a bug. Being in a keychain is not the same question,
+// since trust can be revoked while the certificate stays.
 func TestAlreadyTrustedCertificateAsksForNothing(t *testing.T) {
 	p := provider(t)
-	existing := loginKeychainCertPEM(t)
+	trusted := trustedCertPEM(t)
 	d := device.Device{ID: desktop.ID, Kind: device.KindHost, Platform: device.PlatformDesktop}
 
 	steps, err := p.SetProxy(t.Context(), d, device.ProxyTarget{
-		Host: "127.0.0.1", Port: 9090, CACert: existing, CertName: "a certificate already in the keychain",
+		Host: "127.0.0.1", Port: 9090, CACert: trusted, CertName: "a certificate this Mac trusts",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range steps {
 		if s.Title == "certificate" && s.Manual {
-			t.Errorf("a certificate already in the keychain asked to be installed again: %q", s.Detail)
+			t.Errorf("a trusted certificate asked to be installed again: %q", s.Detail)
 		}
 	}
 }
@@ -164,23 +164,50 @@ func TestUnknownCertificateAsks(t *testing.T) {
 	}
 }
 
-// loginKeychainCertPEM returns a certificate already in the user's login keychain.
-func loginKeychainCertPEM(t *testing.T) []byte {
+// trustedCertPEM returns a certificate this machine actually trusts, found by asking the platform
+// rather than by assuming a keychain entry is trusted.
+func trustedCertPEM(t *testing.T) []byte {
 	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip(err)
 	}
-	out, err := exec.Command("security", "find-certificate", "-a", "-p",
-		home+"/Library/Keychains/login.keychain-db").Output()
+	for _, keychain := range []string{
+		home + "/Library/Keychains/login.keychain-db",
+		"/Library/Keychains/System.keychain",
+	} {
+		out, err := exec.Command("security", "find-certificate", "-a", "-p", keychain).Output()
+		if err != nil {
+			continue
+		}
+		rest := out
+		for {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			one := pem.EncodeToMemory(block)
+			if verifiesHere(t, one) {
+				return one
+			}
+		}
+	}
+	t.Skip("no certificate this machine trusts to test with")
+	return nil
+}
+
+func verifiesHere(t *testing.T, certPEM []byte) bool {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "cert-*.pem")
 	if err != nil {
-		t.Skip(err)
+		return false
 	}
-	block, _ := pem.Decode(out)
-	if block == nil {
-		t.Skip("the login keychain holds no certificate to test with")
+	defer f.Close()
+	if _, err := f.Write(certPEM); err != nil {
+		return false
 	}
-	return pem.EncodeToMemory(block)
+	return exec.Command("security", "verify-cert", "-c", f.Name(), "-p", "basic").Run() == nil
 }
 
 // An app must appear once. An iPhone app running on this Mac is a wrapper whose identifier lives

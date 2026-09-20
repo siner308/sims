@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/siner308/sims/internal/device"
 )
@@ -111,6 +112,14 @@ func (p *Provider) installCA(ctx context.Context, d device.Device, t device.Prox
 func (p *Provider) installSystemCA(ctx context.Context, d device.Device, remote, name string) error {
 	if _, err := run(ctx, p.adb(), "-s", d.Serial, "root"); err != nil {
 		return err
+	}
+	// adb root restarts adbd, which drops the connection; remounting before it is back fails with
+	// "device not found" and sends the user to the manual path on a device where the system store
+	// would have worked
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := run(waitCtx, p.adb(), "-s", d.Serial, "wait-for-device"); err != nil {
+		return fmt.Errorf("%s did not come back after adb root: %w", d.Name, err)
 	}
 	if _, err := run(ctx, p.adb(), "-s", d.Serial, "remount"); err != nil {
 		return err
