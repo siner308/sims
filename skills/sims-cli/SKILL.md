@@ -83,6 +83,12 @@ captured unless `--all` is given. In the TUI the log and the traffic are two lay
 A `tunnel` line is traffic sims could not open, which means the app
 pins its certificate: that is a limit of every proxy, not a failure to report.
 
+A flow carrying `"abandoned": true` is not an error either. The client closed the connection before
+the response finished, which is what a browser does when it has seen enough of an image and what a
+cancelled request looks like; the app got what it asked for. `status` is the one it received and
+`responseSize` counts what arrived, so the stored body stops short of `responseHeaders`'
+Content-Length. Only `error` means the exchange failed.
+
 ## JSON shapes
 
 `device list`, `device get` and every device action print this record. Actions print the device they acted on; `boot --wait` and `wait` print the refreshed record, so `state` and `serial` are current. Fields marked * are omitted when empty.
