@@ -107,7 +107,7 @@ func (v *logsView) Hints() []hint {
 	}
 	return append(append(hints, groupBreak,
 		hint{"n", "next exchange"}, hint{"shift+n", "previous"}, hint{"o", "open headers, then body"},
-		hint{"O", "open every exchange"}, hint{"enter", "read in $PAGER"}, hint{"e", "open in $EDITOR"},
+		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"e", "open in $EDITOR"},
 		groupBreak),
 		append(layers, hint{"ctrl+k", "stop capture"})...)
 }
@@ -329,9 +329,9 @@ func (v *logsView) openMore() {
 	v.text.ScrollToHighlight()
 }
 
-// readSelected hands the exchange to a pager or an editor. A terminal pane is a poor place to read
-// a long body: the tool the user already reads text with has search, folding and copying, and this
-// one has none of them.
+// readSelected opens the exchange in full. editor sends it straight out to $EDITOR; otherwise it
+// opens on a page of its own inside sims, which esc closes, and enter there hands the same text to
+// $PAGER for folding and copying out.
 func (v *logsView) readSelected(editor bool) {
 	if !v.mixing() {
 		return
@@ -344,7 +344,12 @@ func (v *logsView) readSelected(editor bool) {
 		v.app.flash("no exchange selected; press n first")
 		return
 	}
-	v.app.openExternally(f.Method+"-"+hostOf(f), exchangeText(f), editor)
+	title, body := f.Method+"-"+hostOf(f), exchangeText(f)
+	if editor {
+		v.app.openExternally(title, body, true)
+		return
+	}
+	v.app.push(newReaderView(v.app, title, body))
 }
 
 // openAll opens every exchange at once, for reading a whole conversation rather than one call.

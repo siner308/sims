@@ -55,7 +55,7 @@ func (v *flowsView) Name() string               { return "proxy" }
 func (v *flowsView) Primitive() tview.Primitive { return v.table }
 func (v *flowsView) Hints() []hint {
 	return []hint{
-		{"enter", "read in $PAGER"}, {"e", "open in $EDITOR"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
+		{"enter", "read"}, {"e", "open in $EDITOR"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
 		{"d", "device only"}, {"s", "save har"}, {"l", "mix with the log"},
 		groupBreak,
 		{"g", "group by domain"}, {"space", "fold a domain"}, {"shift+g", "fold or unfold all"},
@@ -430,7 +430,7 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 		if f, ok := v.selected(); ok {
-			v.app.openExternally(f.Method+"-"+hostOf(f), exchangeText(f), false)
+			v.app.push(newReaderView(v.app, f.Method+"-"+hostOf(f), exchangeText(f)))
 		}
 		return nil
 	case tcell.KeyCtrlK:

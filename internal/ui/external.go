@@ -40,6 +40,10 @@ func (a *App) openExternally(title, body string, editor bool) {
 				fmt.Fprintf(os.Stderr, "sims: %s: %v\n", name, err)
 			}
 		})
+		// Resume re-enters the alternate screen, which the terminal opens blank, while tcell still
+		// holds what it last sent. An ordinary draw only writes cells it considers changed, so it
+		// would send nothing and leave the screen as the tool left it. Sync redraws every cell.
+		a.tv.Sync()
 		a.tv.QueueUpdateDraw(func() { a.flash("read in " + name + "; the file is at " + path) })
 	}()
 }

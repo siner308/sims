@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/siner308/sims/internal/proxy"
 )
 
-// Reading an exchange has to actually run the tool and give the TUI back afterwards.
+// enter on the reader hands the same text to $PAGER, which has to actually run and give the TUI
+// back afterwards.
 func TestPagerRunsAndTheTUIComesBack(t *testing.T) {
 	a, v, s, stop := streamFor(t, true)
 	defer stop()
@@ -31,6 +33,12 @@ func TestPagerRunsAndTheTUIComesBack(t *testing.T) {
 	})
 
 	a.tv.QueueUpdate(func() { v.readSelected(false) })
+	var rv *readerView
+	waitFor(t, a, 5*time.Second, func() bool {
+		rv, _ = a.top().(*readerView)
+		return rv != nil
+	})
+	a.tv.QueueUpdate(func() { rv.onKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone)) })
 
 	deadline := time.Now().Add(10 * time.Second)
 	var opened []byte
