@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -61,5 +62,52 @@ func TestTPressedInTheAppListOpensTrafficAlone(t *testing.T) {
 				t.Error("t opened with the log layer on too; l is what adds it")
 			}
 		})
+	}
+}
+
+// A capture that cannot finish its own setup has to say what is left to do before the stream opens.
+// Certificate trust is the usual one: without it HTTPS arrives as unopened tunnels, and a user who
+// is not told waits for bodies that cannot come.
+func TestASetupStepTheCaptureCannotDoIsShownBeforeTheStream(t *testing.T) {
+	left := manualSteps([]device.ProxyStep{
+		{Title: "proxy", Detail: "points here while the capture runs"},
+		{Title: "certificate", Detail: "run sims proxy ca localhost --install", Manual: true},
+	})
+	if !strings.Contains(left, "--install") {
+		t.Errorf("the step the user still has to do was dropped: %q", left)
+	}
+	if strings.Contains(left, "points here") {
+		t.Errorf("a step sims did itself was read back as homework: %q", left)
+	}
+
+	prov := &proxyProvider{
+		fakeProvider: &fakeProvider{platform: device.PlatformDesktop, devices: []device.Device{hostDevice()}},
+		steps: []device.ProxyStep{
+			{Title: "certificate", Detail: "run sims proxy ca localhost --install", Manual: true},
+		},
+	}
+	a := New("test", sims.New(prov))
+	_, stop := runHeadless(t, a)
+	defer func() { a.m.StopAllCaptures(); stop() }()
+
+	var dv *devicesView
+	waitFor(t, a, 5*time.Second, func() bool {
+		dv, _ = a.top().(*devicesView)
+		return dv != nil
+	})
+
+	a.tv.QueueUpdate(func() { dv.watchTraffic() })
+	waitFor(t, a, 5*time.Second, func() bool { return a.body.HasPage("confirm") })
+	pressEnterOnConfirm(t, a)
+
+	// the capture starts, and the leftover step holds the stream behind a second confirmation
+	waitFor(t, a, 10*time.Second, func() bool { return a.body.HasPage("confirm") })
+	var opened bool
+	onUIResult(a, func() bool {
+		_, opened = a.top().(*logsView)
+		return true
+	}, 5*time.Second)
+	if opened {
+		t.Error("the stream opened before the user was told what setup is still missing")
 	}
 }

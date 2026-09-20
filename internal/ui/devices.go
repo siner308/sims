@@ -486,9 +486,11 @@ func withCapture(a *App, d device.Device, then func(*capture.Session)) {
 func captureNote(d device.Device) string {
 	switch {
 	case d.IsHost():
+		// whether the certificate still needs installing is answered by the capture's own steps,
+		// which read the keychain; saying it here too would tell a user who is already set up to
+		// run a command they do not need
 		return "sims points this machine's web proxy at itself while the capture runs,\n" +
-			"so every app here goes through it and each row is named by the process behind it.\n" +
-			"Opening HTTPS also needs the certificate trusted: sims proxy ca localhost --install."
+			"so every app here goes through it and each row is named by the process behind it."
 	case capture.NeedsHostProxy(d):
 		return "sims trusts its certificate on the simulator, and points this Mac's web proxy at itself\n" +
 			"while the capture runs. Other apps on the Mac keep working: their traffic is relayed\n" +
