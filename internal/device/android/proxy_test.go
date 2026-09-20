@@ -55,8 +55,12 @@ func TestClearUsesAndroidsNoProxySpelling(t *testing.T) {
 	}
 	got := adb.calls(t)
 	want := "-s emulator-5554 shell settings put global http_proxy :0"
-	if len(got) != 1 || got[0] != want {
-		t.Errorf("adb calls = %q, want %q", got, want)
+	if len(got) == 0 || got[0] != want {
+		t.Errorf("adb calls = %q, want the first to be %q", got, want)
+	}
+	// the write is read back, since settings put reports its failures on stdout and exits 0
+	if len(got) < 2 || !strings.Contains(got[1], "settings get global http_proxy") {
+		t.Errorf("the cleared setting was not read back: %q", got)
 	}
 }
 
@@ -70,8 +74,11 @@ func TestSetProxyWritesHostAndPort(t *testing.T) {
 	}
 	got := adb.calls(t)
 	want := "-s emulator-5554 shell settings put global http_proxy 10.0.2.2:9090"
-	if len(got) != 1 || got[0] != want {
-		t.Errorf("adb calls = %q, want %q", got, want)
+	if len(got) == 0 || got[0] != want {
+		t.Errorf("adb calls = %q, want the first to be %q", got, want)
+	}
+	if len(got) < 2 || !strings.Contains(got[1], "settings get global http_proxy") {
+		t.Errorf("the setting was not read back: %q", got)
 	}
 }
 
@@ -100,7 +107,12 @@ func fakeADB(t *testing.T) adbRecorder {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	script := filepath.Join(dir, "adb")
-	body := "#!/bin/sh\necho \"$@\" >> " + log + "\n"
+	// the stub remembers what the last put wrote, so the read-back sims does finds it
+	value := filepath.Join(dir, "value")
+	body := "#!/bin/sh\n" +
+		"echo \"$@\" >> " + log + "\n" +
+		"if [ \"$4\" = settings ] && [ \"$5\" = put ]; then printf '%s' \"$8\" > " + value + "; fi\n" +
+		"if [ \"$4\" = settings ] && [ \"$5\" = get ]; then cat " + value + " 2>/dev/null; echo; fi\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}

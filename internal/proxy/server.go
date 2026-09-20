@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+// AttributeBudget bounds how long a connection waits for Attribute to say who owns it. The lookup
+// runs before the first request, so a slow answer is latency the captured app feels; past the
+// budget the connection is treated as unattributed, which under the default scope means it is
+// relayed untouched rather than opened on a guess.
+const AttributeBudget = 400 * time.Millisecond
+
 const (
 	DefaultMaxBody   = 1 << 20
 	handshakeTimeout = 15 * time.Second
@@ -39,7 +45,9 @@ type Server struct {
 	Store *Store
 	// MaxBody caps how much of each body is kept; the rest still flows through. Zero means DefaultMaxBody.
 	MaxBody int
-	// Attribute is asked once per client connection, off the request path; nil leaves flows unattributed.
+	// Attribute is asked once per client connection, before the first request is read, because
+	// whether a connection is ours to open has to be decided before anything is read from it. It is
+	// given AttributeBudget to answer; nil leaves flows unattributed.
 	Attribute func(ctx context.Context, clientAddr string) Attribution
 	// Transport reaches the upstream; nil builds one that ignores this machine's proxy settings.
 	Transport http.RoundTripper
@@ -191,10 +199,21 @@ func (ci *connInfo) resolve(ctx context.Context) Attribution {
 		if ci.attribute == nil {
 			return
 		}
-		a := ci.attribute(ctx, ci.client)
-		ci.mu.Lock()
-		ci.attr, ci.known = a, true
-		ci.mu.Unlock()
+		// the answer decides whether this connection is opened, so it cannot be deferred; it can be
+		// given a deadline, and a lookup that overruns finishes in the background for the flow's
+		// own label, which finish() re-reads
+		done := make(chan Attribution, 1)
+		go func() {
+			a := ci.attribute(context.WithoutCancel(ctx), ci.client)
+			ci.mu.Lock()
+			ci.attr, ci.known = a, true
+			ci.mu.Unlock()
+			done <- a
+		}()
+		select {
+		case <-done:
+		case <-time.After(AttributeBudget):
+		}
 	})
 	ci.mu.Lock()
 	defer ci.mu.Unlock()
@@ -222,6 +241,13 @@ func (s *Server) handleOuter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ignore {
+		// an upgrade cannot survive a RoundTrip: relay strips Connection and Upgrade, so the origin
+		// answers 200 and the app's websocket silently never establishes. Traffic sims was not
+		// asked to watch has to come out the other side unchanged.
+		if isUpgrade(r) {
+			s.relayUpgrade(w, r)
+			return
+		}
 		s.relay(w, r)
 		return
 	}
@@ -266,9 +292,13 @@ func (s *Server) finish(ctx context.Context, l *liveFlow, fn func(*Flow)) {
 var hopByHop = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade"}
 
 func stripHopByHop(h http.Header) {
-	for _, name := range strings.Split(h.Get("Connection"), ",") {
-		if name = strings.TrimSpace(name); name != "" {
-			h.Del(name)
+	// Connection can appear more than once, and Get returns only the first: a header named in a
+	// later line would be forwarded to the origin after the client asked for it to stop here
+	for _, line := range h.Values("Connection") {
+		for _, name := range strings.Split(line, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				h.Del(name)
+			}
 		}
 	}
 	for _, name := range hopByHop {
@@ -276,10 +306,21 @@ func stripHopByHop(h http.Header) {
 	}
 }
 
+// proxyOnlyHeaders are the ones that belong to the hop between the client and this proxy. An
+// upgrade keeps Connection and Upgrade, which carry the handshake, but must not carry the
+// credentials the client sent to the proxy on to whatever origin it is reaching.
+var proxyOnlyHeaders = []string{"Proxy-Connection", "Proxy-Authorization", "Proxy-Authenticate", "Keep-Alive"}
+
+func stripProxyOnly(h http.Header) {
+	for _, name := range proxyOnlyHeaders {
+		h.Del(name)
+	}
+}
+
 // forward is the request path for both a plain proxy request and one read inside a TLS tunnel.
 func (s *Server) forward(w http.ResponseWriter, r *http.Request, scheme string) {
 	ctx := r.Context()
-	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+	if isUpgrade(r) {
 		s.websocket(w, r, scheme)
 		return
 	}
@@ -396,6 +437,8 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request, scheme string
 	out := r.Clone(ctx)
 	out.RequestURI = ""
 	out.URL.Scheme, out.URL.Host, out.Host = scheme, host, host
+	// the upgrade keeps Connection and Upgrade, but not what the client sent to the proxy itself
+	stripProxyOnly(out.Header)
 	if err := out.Write(upstream); err != nil {
 		fail(http.StatusBadGateway, err)
 		return
@@ -528,6 +571,50 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, ignore bo
 		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	_ = inner.Serve(newOneConnListener(tlsConn))
+}
+
+// isUpgrade reports whether the request asks to leave HTTP behind.
+func isUpgrade(r *http.Request) bool {
+	return r.Header.Get("Upgrade") != ""
+}
+
+// relayUpgrade hands an ignored upgrade to the origin byte for byte. Nothing is decoded and nothing
+// is recorded: for traffic sims was not asked to watch, the proxy has to be invisible.
+func (s *Server) relayUpgrade(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	scheme := r.URL.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	upstream, err := s.dial(r.Context(), scheme, host)
+	if err != nil {
+		http.Error(w, "sims proxy: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer upstream.Close()
+
+	out := r.Clone(r.Context())
+	out.RequestURI = ""
+	out.URL.Scheme, out.URL.Host, out.Host = scheme, host, host
+	stripProxyOnly(out.Header)
+	if err := out.Write(upstream); err != nil {
+		http.Error(w, "sims proxy: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	client, buf, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer client.Close()
+	if !s.track(client) {
+		return
+	}
+	defer s.untrack(client)
+	pipe(client, buf.Reader, upstream, upstream)
 }
 
 // relay forwards a plain request for traffic sims was not asked to watch, recording nothing.

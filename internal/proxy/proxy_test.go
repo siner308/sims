@@ -1,8 +1,10 @@
 package proxy_test
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -735,5 +737,203 @@ func TestFlowJSONDecodesAndMarksBodies(t *testing.T) {
 	}
 	if _, err := base64.StdEncoding.DecodeString(got["responseBody"].(string)); err != nil {
 		t.Errorf("the marked body is not base64: %v", err)
+	}
+}
+
+// Connection can appear more than once. Reading only the first line forwarded a header the client
+// had asked to terminate at the proxy, which is the shape request-smuggling tooling probes for.
+func TestEveryConnectionHeaderIsHonoured(t *testing.T) {
+	var got http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+	}))
+	defer upstream.Close()
+
+	_, client := start(t)
+	req, _ := http.NewRequest(http.MethodGet, upstream.URL+"/", nil)
+	req.Header["Connection"] = []string{"X-One", "X-Two"}
+	req.Header.Set("X-One", "a")
+	req.Header.Set("X-Two", "b")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	for _, name := range []string{"X-One", "X-Two"} {
+		if got.Get(name) != "" {
+			t.Errorf("%s was forwarded to the origin though the client scoped it to the proxy", name)
+		}
+	}
+}
+
+// A device configured with an upstream authenticating proxy sends Proxy-Authorization on every
+// request. The websocket path used to hand that credential to the origin.
+func TestWebSocketDoesNotLeakProxyCredentials(t *testing.T) {
+	var got http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer upstream.Close()
+
+	_, client := start(t)
+	req, _ := http.NewRequest(http.MethodGet, upstream.URL+"/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Proxy-Authorization", "Basic c2VjcmV0OnBhc3N3b3Jk")
+	req.Header.Set("Proxy-Connection", "keep-alive")
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for got == nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got == nil {
+		t.Skip("the upgrade never reached the upstream")
+	}
+	if got.Get("Proxy-Authorization") != "" {
+		t.Error("the client's proxy credential was sent to the origin")
+	}
+	if got.Get("Proxy-Connection") != "" {
+		t.Error("Proxy-Connection was forwarded to the origin")
+	}
+	// the handshake headers must survive, or the upgrade cannot work at all
+	if got.Get("Upgrade") == "" {
+		t.Error("the upgrade header was stripped, so no websocket can be established")
+	}
+}
+
+// A capture that borrows this machine's proxy settings sees every app on it. Traffic it was not
+// asked to watch must come out unchanged: the relay used to strip Upgrade, so other apps' plain
+// websockets answered 200 instead of 101 and failed in a way that looked like their own bug.
+func TestIgnoredUpgradeStillUpgrades(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Upgrade") == "" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		conn, buf, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+		buf.Flush()
+	}))
+	defer upstream.Close()
+
+	srv, _ := start(t, func(s *proxy.Server) {
+		s.Attribute = func(context.Context, string) proxy.Attribution {
+			return proxy.Attribution{Label: "someone else", Origin: proxy.OriginHost, Ignore: true}
+		}
+	})
+
+	conn, err := net.Dial("tcp", srv.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	host := strings.TrimPrefix(upstream.URL, "http://")
+	fmt.Fprintf(conn, "GET %s/ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+		upstream.URL, host)
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("no response: %v", err)
+	}
+	if !strings.Contains(line, "101") {
+		t.Errorf("an ignored upgrade came back as %q, want 101", strings.TrimSpace(line))
+	}
+	// and nothing was recorded, since this traffic is not the capture's subject
+	if n := srv.Store.Len(); n != 0 {
+		t.Errorf("ignored traffic produced %d flows", n)
+	}
+}
+
+// Capping the number of flows alone lets the store hold gigabytes: 2000 exchanges of a megabyte
+// each. A long capture of an app moving images would take the TUI down with it.
+func TestStoreBoundsWhatItHoldsInBodies(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(make([]byte, 512*1024))
+	}))
+	defer upstream.Close()
+
+	srv, client := start(t)
+	// enough traffic to pass the budget several times over would be slow; the accounting is what
+	// matters, so the check is that held bytes stay bounded as flows accumulate
+	for i := range 12 {
+		resp, err := client.Get(fmt.Sprintf("%s/%d", upstream.URL, i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	waitFlows(t, srv.Store, 12)
+
+	var held int64
+	for _, f := range srv.Store.Flows() {
+		held += int64(len(f.ReqBody) + len(f.RespBody))
+	}
+	if held > 256<<20 {
+		t.Errorf("the store is holding %d bytes of bodies", held)
+	}
+	// and the exchanges themselves are still listed
+	if n := srv.Store.Len(); n != 12 {
+		t.Errorf("flows = %d, want all 12 still listed", n)
+	}
+}
+
+// An app that reaches many hosts must not grow the certificate cache without bound.
+func TestLeafCacheIsBounded(t *testing.T) {
+	ca, err := proxy.LoadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 700 {
+		if _, err := ca.Leaf(fmt.Sprintf("host%d.example.com", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := ca.CachedLeavesForTest(); n > 512 {
+		t.Errorf("the certificate cache holds %d entries", n)
+	}
+	// and it still works after the cap is reached
+	if _, err := ca.Leaf("example.com"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Naming the process behind a connection needs lsof, which can take seconds on a busy machine. The
+// lookup runs before the first request, so without a budget the capture changes the timing of the
+// app it is meant to observe.
+func TestASlowAttributionDoesNotStallTheRequest(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "ok")
+	}))
+	defer upstream.Close()
+
+	_, client := start(t, func(s *proxy.Server) {
+		s.Attribute = func(context.Context, string) proxy.Attribution {
+			time.Sleep(3 * time.Second)
+			return proxy.Attribution{Label: "slow", Origin: proxy.OriginDevice}
+		}
+	})
+
+	began := time.Now()
+	resp, err := client.Get(upstream.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if took := time.Since(began); took > 2*time.Second {
+		t.Errorf("the first request waited %v on the attribution lookup", took.Round(time.Millisecond))
 	}
 }

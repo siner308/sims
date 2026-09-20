@@ -139,3 +139,22 @@ func TestPhoneProfileRequiresASigner(t *testing.T) {
 		t.Errorf("error = %q", err)
 	}
 }
+
+// Every value interpolated into the plist has to be escaped, not just the ones a test happened to
+// cover. The host comes from a network interface or a flag, and an unescaped ampersand there makes
+// a profile the phone rejects with nothing pointing back at the cause.
+func TestProfileEscapesEveryInterpolatedValue(t *testing.T) {
+	path, cleanup, err := writeProfile(device.ProxyTarget{
+		Host: `10.0.0.1" & <bad>`, Port: 9090,
+		CACertDER: []byte{1, 2, 3}, CertName: "sims proxy CA", SSID: "Home",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		body, _ := os.ReadFile(path)
+		t.Fatalf("a host with & and <> produced an invalid plist: %v %s\n%s", err, out, body)
+	}
+}

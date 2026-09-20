@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,10 +38,16 @@ func (p *Provider) SetProxy(ctx context.Context, d device.Device, t device.Proxy
 	if d.Serial == "" {
 		return nil, errors.New("device is not running")
 	}
-	if _, err := run(ctx, p.adb(), "-s", d.Serial, "shell", "settings", "put", "global", "http_proxy", t.Addr()); err != nil {
-		return nil, err
+	// a cert-only call: the caller wants the certificate trusted and nothing pointed anywhere
+	if t.Port != 0 {
+		if err := p.putProxy(ctx, d, t.Addr()); err != nil {
+			return nil, err
+		}
 	}
 	steps := []device.ProxyStep{{Title: "proxy", Detail: "traffic goes to " + t.Addr()}}
+	if t.Port == 0 {
+		steps = nil
+	}
 	if len(t.CACert) == 0 {
 		return steps, nil
 	}
@@ -65,21 +72,32 @@ func (p *Provider) installCA(ctx context.Context, d device.Device, t device.Prox
 	}
 	defer os.Remove(local)
 
-	remote := "/data/local/tmp/" + name
-	if _, err := run(ctx, p.adb(), "-s", d.Serial, "push", local, remote); err != nil {
+	staged := "/data/local/tmp/" + name
+	if _, err := run(ctx, p.adb(), "-s", d.Serial, "push", local, staged); err != nil {
 		return nil, err
 	}
-	defer run(ctx, p.adb(), "-s", d.Serial, "shell", "rm", "-f", remote)
 
-	if err := p.installSystemCA(ctx, d, remote, name); err == nil {
+	if err := p.installSystemCA(ctx, d, staged, name); err == nil {
+		// the staged copy has been installed, so it is no longer needed
+		run(ctx, p.adb(), "-s", d.Serial, "shell", "rm", "-f", staged)
 		return []device.ProxyStep{{
 			Title:  "certificate",
 			Detail: t.CertName + " is in the system trust store; every app on the device trusts it",
 		}}, nil
 	}
+	run(ctx, p.adb(), "-s", d.Serial, "shell", "rm", "-f", staged)
+
+	// The user has to install it themselves, and Android's certificate picker browses shared
+	// storage: it cannot reach /data/local/tmp, and a file deleted on the way out of this function
+	// would not be there to pick either. So the copy they are sent to find lives in Downloads and
+	// stays.
+	visible := "/sdcard/Download/" + t.CertName + ".crt"
+	if _, err := run(ctx, p.adb(), "-s", d.Serial, "push", local, visible); err != nil {
+		return nil, fmt.Errorf("could not put the certificate where you can install it: %w", err)
+	}
 	return []device.ProxyStep{{
 		Title:  "certificate",
-		Detail: "open Settings > Security > Encryption & credentials > Install a certificate > CA certificate and pick " + remote,
+		Detail: "it is in Downloads as " + t.CertName + ".crt; open Settings > Security > Encryption & credentials > Install a certificate > CA certificate and pick it",
 		Manual: true,
 	}, {
 		Title:  "app opt-in",
@@ -126,21 +144,63 @@ func (p *Provider) ClearProxy(ctx context.Context, d device.Device) error {
 		return errors.New("device is not running")
 	}
 	// ":0" is how Android spells "no proxy"; an empty value leaves the old one in place
-	_, err := run(ctx, p.adb(), "-s", d.Serial, "shell", "settings", "put", "global", "http_proxy", ":0")
-	return err
+	return p.putProxy(ctx, d, ":0")
+}
+
+// putProxy writes the setting and reads it back. `settings put` exits 0 and prints its failure on
+// stdout on a device where the shell cannot write global settings, so trusting the exit status
+// would report a configured device that will never send a single request to the proxy.
+func (p *Provider) putProxy(ctx context.Context, d device.Device, value string) error {
+	out, err := run(ctx, p.adb(), "-s", d.Serial, "shell", "settings", "put", "global", "http_proxy", value)
+	if err != nil {
+		return err
+	}
+	if msg := strings.TrimSpace(out); msg != "" {
+		return fmt.Errorf("could not set the proxy on %s: %s", d.Name, firstLine(msg))
+	}
+	got, err := p.readProxy(ctx, d)
+	if err != nil {
+		return err
+	}
+	if got != value && !(value == ":0" && got == "") {
+		return fmt.Errorf("the proxy on %s reads back as %q after setting it to %q", d.Name, got, value)
+	}
+	return nil
+}
+
+// readProxy is the setting as the device reports it, normalised so "no proxy" is the empty string
+// however the device spells it.
+func (p *Provider) readProxy(ctx context.Context, d device.Device) (string, error) {
+	out, err := run(ctx, p.adb(), "-s", d.Serial, "shell", "settings", "get", "global", "http_proxy")
+	if err != nil {
+		return "", err
+	}
+	got := strings.TrimSpace(out)
+	switch got {
+	case "", "null", ":0":
+		return "", nil
+	}
+	// anything that is not host:port is the shell reporting a problem, not an address
+	if _, _, err := net.SplitHostPort(got); err != nil {
+		return "", fmt.Errorf("%s reported %q instead of a proxy address", d.Name, firstLine(got))
+	}
+	return got, nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func (p *Provider) ProxyState(ctx context.Context, d device.Device) (device.ProxyState, error) {
 	if d.Serial == "" {
 		return device.ProxyState{}, nil
 	}
-	out, err := run(ctx, p.adb(), "-s", d.Serial, "shell", "settings", "get", "global", "http_proxy")
+	addr, err := p.readProxy(ctx, d)
 	if err != nil {
 		return device.ProxyState{}, err
-	}
-	addr := strings.TrimSpace(out)
-	if addr == "" || addr == "null" || addr == ":0" {
-		return device.ProxyState{}, nil
 	}
 	return device.ProxyState{Addr: addr}, nil
 }

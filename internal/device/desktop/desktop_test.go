@@ -193,13 +193,15 @@ func TestAnAppAppearsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// helper processes legitimately share a bundle identifier, and a daemon may have none at all,
+	// so what must be unique is the app plus the executable behind it
 	seen := map[string]int{}
 	for _, a := range apps {
-		seen[a.BundleID]++
+		seen[a.BundleID+"\x00"+a.Process+"\x00"+a.Name]++
 	}
-	for id, n := range seen {
+	for key, n := range seen {
 		if n > 1 {
-			t.Errorf("%s appears %d times", id, n)
+			t.Errorf("%q appears %d times", strings.ReplaceAll(key, "\x00", " / "), n)
 		}
 	}
 
@@ -273,4 +275,31 @@ func homeApps(t *testing.T) string {
 		t.Skip(err)
 	}
 	return filepath.Join(home, "Applications")
+}
+
+// lsappinfo prints "[ NULL ]" for a process with no bundle identifier. Taken as a literal id it
+// becomes one key shared by a dozen unrelated processes, and all but the last vanish from the list
+// a reader uses to attribute a captured flow.
+func TestProcessesWithoutAnIdentifierEachGetARow(t *testing.T) {
+	p := provider(t)
+	apps, err := p.Apps(t.Context(), device.Device{ID: desktop.ID, Kind: device.KindHost})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range apps {
+		if strings.Contains(a.BundleID, "NULL") {
+			t.Errorf("%q carries a placeholder identifier: %q", a.Name, a.BundleID)
+		}
+	}
+
+	// helper processes legitimately share an identifier; they must not collapse into one row
+	running := 0
+	for _, a := range apps {
+		if a.Running {
+			running++
+		}
+	}
+	if running < 50 {
+		t.Errorf("only %d running apps of %d survived the merge; rows are being lost", running, len(apps))
+	}
 }

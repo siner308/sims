@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -199,9 +198,9 @@ func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), erro
 		Identifier: profileIdentifier,
 		CertName:   xmlEscape(t.CertName),
 		CertBase64: base64.StdEncoding.EncodeToString(t.CACertDER),
-		Host:       t.Host,
+		Host:       xmlEscape(t.Host),
 		Port:       t.Port,
-		Addr:       t.Addr(),
+		Addr:       xmlEscape(t.Addr()),
 		// a wifi name is whatever its owner typed; & or < would otherwise make the plist unparseable
 		SSID: xmlEscape(t.SSID),
 	}
@@ -230,8 +229,20 @@ func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), erro
 			return "", nil, fmt.Errorf("could not sign the profile: %w", err)
 		}
 	}
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("sims-proxy-%s.mobileconfig", shortHash(t.CACertDER)))
-	if err := os.WriteFile(path, out, 0o600); err != nil {
+	// a path derived from the CA alone is the same for every capture, so two running at once write
+	// and delete each other's file
+	f, err := os.CreateTemp("", "sims-proxy-*.mobileconfig")
+	if err != nil {
+		return "", nil, err
+	}
+	path := f.Name()
+	if _, err := f.Write(out); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", nil, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
 		return "", nil, err
 	}
 	return path, func() { os.Remove(path) }, nil

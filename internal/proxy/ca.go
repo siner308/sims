@@ -200,6 +200,11 @@ func (c *CA) SignCMS(data []byte) ([]byte, error) {
 	return signed.Finish()
 }
 
+// maxCachedLeaves bounds the certificate cache. An app that talks to many hosts, an ad SDK or a
+// CDN with per-shard names, would otherwise grow it for the life of the capture, and a debugging
+// proxy has no need to remember more than this.
+const maxCachedLeaves = 512
+
 // Leaf returns a server certificate for host (a DNS name or an IP), signing one the first time and
 // again once a cached one is within a day of expiring.
 func (c *CA) Leaf(host string) (*tls.Certificate, error) {
@@ -211,6 +216,10 @@ func (c *CA) Leaf(host string) (*tls.Certificate, error) {
 	leaf, err := c.sign(host)
 	if err != nil {
 		return nil, err
+	}
+	if len(c.leaves) >= maxCachedLeaves {
+		// signing is cheap next to the memory; start again rather than track an eviction order
+		clear(c.leaves)
 	}
 	c.leaves[host] = leaf
 	return leaf, nil
@@ -260,4 +269,11 @@ func keyID(pub *ecdsa.PublicKey) []byte {
 	}
 	sum := sha256.Sum256(der)
 	return sum[:20]
+}
+
+// CachedLeavesForTest is how many certificates the cache is holding.
+func (c *CA) CachedLeavesForTest() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.leaves)
 }

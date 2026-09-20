@@ -118,6 +118,27 @@ func (l *liveFlow) done() bool {
 	return l.f.Done
 }
 
+// bodyBytes is what this flow is holding in memory.
+func (l *liveFlow) bodyBytes() int64 {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return int64(len(l.f.ReqBody) + len(l.f.RespBody))
+}
+
+// dropBodies releases the captured bodies and reports how much that freed. The flow keeps its sizes,
+// so the detail can still say how big the body was and that it is no longer held.
+func (l *liveFlow) dropBodies() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	freed := int64(len(l.f.ReqBody) + len(l.f.RespBody))
+	if freed == 0 {
+		return 0
+	}
+	l.f.ReqBody, l.f.RespBody = nil, nil
+	l.f.ReqTruncated, l.f.RespTruncated = true, true
+	return freed
+}
+
 func (l *liveFlow) id() int64 {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -134,7 +155,24 @@ type Store struct {
 	onDone  []func(Flow)
 }
 
+// dropBodiesIfOver frees the oldest flows' bodies once the store is holding more than it should.
+// The exchanges stay listed, since what happened is worth more than what was in it.
+func (s *Store) dropBodiesIfOver() {
+	var total int64
+	for _, l := range s.flows {
+		total += l.bodyBytes()
+	}
+	for i := 0; i < len(s.flows) && total > maxStoredBodyBytes; i++ {
+		total -= s.flows[i].dropBodies()
+	}
+}
+
 const DefaultMaxFlows = 2000
+
+// maxStoredBodyBytes bounds what the store keeps in bodies. Capping the number of flows alone lets
+// 2000 exchanges of a megabyte each hold gigabytes, which on a long capture of an app that moves
+// images or video takes the whole TUI down with it.
+const maxStoredBodyBytes = 256 << 20
 
 func NewStore(maxFlows int) *Store {
 	if maxFlows <= 0 {
@@ -159,6 +197,7 @@ func (s *Store) add(l *liveFlow) {
 // touch is called by the proxy after every visible change to a flow; the store only relays it.
 func (s *Store) touch(l *liveFlow) {
 	s.mu.Lock()
+	s.dropBodiesIfOver()
 	s.bump()
 	handlers := slices.Clone(s.onDone)
 	s.mu.Unlock()

@@ -236,16 +236,15 @@ func (c *cli) proxyCACmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("%s cannot install a certificate from here", d.Platform)
 			}
+			// port 0 means "the certificate only": a provider must not point the device at
+			// anything, since a device left on a dead proxy between here and a clearing call has
+			// no network at all
 			steps, err := proxier.SetProxy(ctx, d, device.ProxyTarget{
 				CACert: ca.CertPEM(), CACertDER: ca.CertDER(), CertName: "sims proxy CA",
-				Host: "127.0.0.1", Port: 0, SSID: currentSSID(ctx),
+				SSID: currentSSID(ctx),
 			})
 			if err != nil {
 				return err
-			}
-			// the certificate is what was wanted, not the proxy setting that came with it
-			if err := proxier.ClearProxy(ctx, d); err != nil {
-				fmt.Fprintln(c.Err, "sims:", err)
 			}
 			if c.json {
 				return c.printJSON(steps)

@@ -23,18 +23,20 @@ func (p *Provider) Apps(ctx context.Context, _ device.Device) ([]device.App, err
 	}
 	byBundle := map[string]device.App{}
 	for _, a := range running {
-		byBundle[a.BundleID] = a
+		// a process with no identifier of its own still needs a row: several share the map key
+		// otherwise and all but one disappear
+		byBundle[runningKey(a)] = a
 	}
 	runningByName := map[string]string{}
 	for _, a := range running {
-		runningByName[strings.ToLower(a.Name)] = a.BundleID
+		runningByName[strings.ToLower(a.Name)] = runningKey(a)
 	}
 	for _, a := range installedApps(ctx) {
 		key := a.BundleID
 		// an app whose identifier could not be read is still the same app as the running one with
 		// its name, and must not appear twice
-		if id, same := runningByName[strings.ToLower(a.Name)]; same {
-			key = id
+		if runKey, same := runningByName[strings.ToLower(a.Name)]; same {
+			key = runKey
 		}
 		if up, seen := byBundle[key]; seen {
 			// a running app keeps its state but takes the version the bundle knows
@@ -60,6 +62,19 @@ func (p *Provider) Apps(ctx context.Context, _ device.Device) ([]device.App, err
 	return out, nil
 }
 
+// runningKey identifies one running process. Helper processes legitimately share a bundle
+// identifier, and anything without one would share the empty string, so the executable and the name
+// separate them.
+func runningKey(a device.App) string {
+	if a.BundleID != "" && a.Process != "" {
+		return a.BundleID + "\x00" + a.Process
+	}
+	if a.BundleID != "" {
+		return a.BundleID
+	}
+	return "name:" + a.Name + "\x00" + a.Process
+}
+
 // runningApps reads lsappinfo, which names every app the window server knows about, background
 // agents included. Its output is a numbered entry per app followed by indented fields.
 func runningApps(ctx context.Context) ([]device.App, error) {
@@ -82,7 +97,13 @@ func runningApps(ctx context.Context) ([]device.App, error) {
 			flush()
 			cur = device.App{Name: between(trimmed, `"`, `"`), Running: true, Source: "installed"}
 		case strings.HasPrefix(trimmed, "bundleID="):
-			cur.BundleID = strings.Trim(strings.TrimPrefix(trimmed, "bundleID="), `"`)
+			// lsappinfo prints "[ NULL ]" for a process with no bundle identifier; taken literally
+			// it becomes one identifier shared by every such process, and they collapse into one row
+			id := strings.Trim(strings.TrimPrefix(trimmed, "bundleID="), `"`)
+			if strings.Contains(id, "NULL") || !strings.Contains(id, ".") {
+				id = ""
+			}
+			cur.BundleID = id
 		case strings.HasPrefix(trimmed, "executable path="):
 			path := strings.Trim(strings.TrimPrefix(trimmed, "executable path="), `"`)
 			cur.Process = filepath.Base(path)
