@@ -39,6 +39,8 @@ type logsView struct {
 	nowrap bool
 	// noFollow stops the view jumping to the end as lines arrive, even while it is sitting there.
 	noFollow bool
+	// stepped is set once the reader has moved the cursor themselves, after which it stays put.
+	stepped bool
 	// waiting is set while the runner shows in the status bar; only the UI goroutine touches it
 	waiting bool
 
@@ -301,7 +303,7 @@ func (v *logsView) step(forward bool) {
 	default:
 		at = max(at-1, 0)
 	}
-	v.cursor = entryID(ex[at])
+	v.cursor, v.stepped = entryID(ex[at]), true
 	v.redraw()
 	v.text.Highlight(v.cursor)
 	v.text.ScrollToHighlight()
@@ -443,6 +445,11 @@ func (v *logsView) Refresh() {
 		return
 	}
 	v.text.Clear()
+	// the traffic already on the timeline has to be put back: clearing and then waiting for the
+	// first log line leaves a stream that had exchanges in it looking empty until one arrives
+	if v.mixing() {
+		v.redraw()
+	}
 	v.text.ScrollToEnd()
 	v.waiting = true
 	v.app.startSpinner(v.waitMsg())
@@ -555,12 +562,27 @@ func (v *logsView) append(chunk []string) {
 	}
 }
 
+// followCursor keeps a selection on the newest exchange while the view is following the stream, so
+// pressing o or enter on arrival acts on something. A reader who has stepped or held the view has
+// chosen where to be, and the cursor stays where they put it.
+func (v *logsView) followCursor(following bool) {
+	if !v.mixing() || !following || v.stepped {
+		return
+	}
+	ex := v.exchanges()
+	if len(ex) == 0 {
+		return
+	}
+	v.cursor = entryID(ex[len(ex)-1])
+}
+
 // redraw rebuilds the text but keeps the reader's place: a view scrolled up stays where it was,
 // only a view that was already at the end keeps following new lines.
 func (v *logsView) redraw() {
 	row, _ := v.text.GetScrollOffset()
 	_, _, _, height := v.text.GetInnerRect()
 	atEnd := !v.noFollow && row+height >= v.text.GetOriginalLineCount()
+	v.followCursor(atEnd)
 	v.text.Clear()
 	if v.mixing() {
 		for _, e := range v.visibleEntries() {
@@ -641,7 +663,7 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			v.session.Store.Clear()
 			// the exchanges are gone, so what was opened and where the cursor sat are too
 			v.opened = map[string]detail{}
-			v.cursor = ""
+			v.cursor, v.stepped = "", false
 		}
 		v.text.Clear()
 	case 'p':

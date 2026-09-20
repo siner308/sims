@@ -143,3 +143,46 @@ func TestAnAbandonedResponseIsNotAnError(t *testing.T) {
 		t.Errorf("the partial size is not marked as partial: %q", row)
 	}
 }
+
+// An exchange arriving on an untouched stream is selected straight away, so o and enter act on
+// something. Before this the cursor stayed empty until the reader pressed a key, and a first visit
+// to a quiet capture had nothing to select at all.
+func TestTheNewestExchangeIsSelectedWhileFollowing(t *testing.T) {
+	a, v, s, stop := streamFor(t, true)
+	defer stop()
+
+	send(s, "GET", "https://a.example.com/first", 200, "", "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		v.timeline.setFlows(s.Flows())
+		v.redraw()
+		return v.cursor != ""
+	})
+	if f, ok := v.selectedFlow(); !ok || !strings.Contains(f.URL, "first") {
+		t.Errorf("the arriving exchange was not selected: %v %q", ok, f.URL)
+	}
+
+	// a later one takes the selection, the way a following view follows
+	send(s, "GET", "https://b.example.com/second", 200, "", "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		v.timeline.setFlows(s.Flows())
+		v.redraw()
+		f, ok := v.selectedFlow()
+		return ok && strings.Contains(f.URL, "second")
+	})
+
+	// once the reader steps, the cursor is theirs and new arrivals leave it alone
+	a.tv.QueueUpdate(func() { v.step(false) })
+	waitFor(t, a, 5*time.Second, func() bool {
+		f, ok := v.selectedFlow()
+		return ok && strings.Contains(f.URL, "first")
+	})
+	send(s, "GET", "https://c.example.com/third", 200, "", "")
+	waitFor(t, a, 5*time.Second, func() bool {
+		v.timeline.setFlows(s.Flows())
+		v.redraw()
+		return len(v.exchanges()) == 3
+	})
+	if f, _ := v.selectedFlow(); !strings.Contains(f.URL, "first") {
+		t.Errorf("a new arrival moved the cursor the reader had placed: %q", f.URL)
+	}
+}
