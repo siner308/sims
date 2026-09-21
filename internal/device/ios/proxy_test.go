@@ -91,9 +91,7 @@ func TestProfileEscapesTheWifiName(t *testing.T) {
 	}
 }
 
-// devicectl refuses an unsigned .mobileconfig, reading it as a provisioning profile and reporting
-// "The provisioning profile CMS/PKCS#7 envelope is invalid" (OSStatus -25257). A signed profile is
-// a CMS envelope, so it no longer starts with a plist header.
+// A phone's profile must go out signed; a CMS envelope no longer starts with a plist header, which is what tells the two apart.
 func TestSignedProfileIsACMSEnvelope(t *testing.T) {
 	ca, err := proxy.LoadOrCreateCA(t.TempDir())
 	if err != nil {
@@ -115,7 +113,7 @@ func TestSignedProfileIsACMSEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if bytes.HasPrefix(bytes.TrimSpace(body), []byte("<?xml")) {
-		t.Fatal("the profile went out unsigned; devicectl reads that as a provisioning profile and refuses it")
+		t.Fatal("the profile went out unsigned")
 	}
 	// DER SEQUENCE
 	if body[0] != 0x30 {

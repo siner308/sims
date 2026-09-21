@@ -127,10 +127,10 @@ full, with headers and a pretty-printed body, `/` filters, `s` writes a HAR file
 Charles or the browser dev tools can read, and `ctrl+k` stops the capture and puts every setting
 back.
 
-Opening HTTPS needs the device to trust a certificate sims signs with, and sims installs it as part
-of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb push` into the
-system trust store on an emulator that allows it, a configuration profile on an iPhone. The
-certificate is made once and kept, so the second capture on a device needs no setup at all.
+Opening HTTPS needs the device to trust a certificate sims signs with, and sims installs it as part of starting the capture: `simctl keychain add-root-cert` on a simulator, an `adb push` into the system trust store on an emulator that allows it, and on an iPhone a configuration profile served from the capture's own port, since neither devicectl nor libimobiledevice can install one.
+What a phone will only let its owner do, sims lists as numbered taps before the stream opens, and does the parts a Mac can reach: on an iPhone it opens the profile's URL in the phone's Safari (`devicectl device process launch --payload-url`), and once the phone has fetched it offers to open Settings there, leaving Allow, Install and the switch under Certificate Trust Settings to the owner; on an Android phone without root the certificate is put in Downloads and picked from Settings, which is the only place Android 11 and later accept a CA certificate. On an emulator whose image takes `adb root` (the Play Store images refuse it) sims writes the system store itself and nothing is left to tap.
+That happens once per phone: the profile names a fixed port (9797), sims records what the phone was given, and every later capture on the same wifi with the same certificate finds it already there and installs nothing. The profile stays after a capture, because nothing on the Mac can remove it, so the phone keeps sending its traffic here: the TUI relays it untouched while open, `sims proxy standby <phone>` does the same from a terminal, and `--setup` sends the profile again when the phone lost it or moved to another wifi.
+The certificate is made once and kept, so the second capture on a device needs no setup at all.
 
 The machine sims runs on is in the list too, as a `desktop` device. `enter` opens what is running
 here and what is installed, with the process name that ties each app to a row in a capture, and
@@ -251,8 +251,9 @@ sims app install <device> <path>            # .apk on android; .app or .ipa on a
 sims app uninstall | launch <device> <bundle>
 sims app logs <device> <bundle>             # android: the app must be running (logcat --pid)
 
-sims proxy run <device> [--port N] [--har out.har] [--for 30s] [--all] [--quiet] [--json]
+sims proxy run <device> [--port N] [--har out.har] [--for 30s] [--all] [--quiet] [--ssid <wifi>] [--setup] [--json]
 sims proxy ca [device] [--install]          # print the root certificate, or trust it on a device
+sims proxy standby <phone>                  # relay an iPhone's traffic untouched while no capture runs
 sims proxy clean                            # put back what a killed capture left behind
 
 sims image list [--all]                     # --all includes what sdkmanager can still download
@@ -316,6 +317,7 @@ sims skill > SKILL.md                   # for any other agent
 | proxy | `enter` `v` `e` `shift+e` | read an exchange on its own page (`esc` closes it, `enter` there sends the text to `$PAGER`) / open the response body in whatever opens that kind of file / open the exchange in a windowed editor / pick a different editor |
 | proxy | `/` `c` `p` `d` `s` | filter, clear, pause, hide this machine's own apps, save a HAR file |
 | proxy | `g` / `space` / `shift+g` | group by domain (`enter` on a heading folds it) / fold one domain / fold or unfold every domain |
+| proxy | `y` | filter by resource type the way a browser's network panel does: a list of xhr, doc, js, css, img, font, media, ws and other with counts, where `space` shows or hides one, `o` keeps only that one and `a` shows all; the table's TYPE column carries the same bucket, and the stream honours the same filter |
 | proxy | `ctrl+k` / `esc` | stop the capture and restore every setting / leave the view with the capture running |
 | stream | `up` / `down` `o` `shift+o` `f` | step between exchanges / open the selected one in place, headers then body / open every exchange / hold the view still while requests keep landing |
 | devices, apps | `h` / `backspace` / `o` | send Home / Back / Overview to the device (android: `adb shell input keyevent`) |
@@ -364,7 +366,7 @@ A paired phone on the same wifi shows as `Offline` until a CoreDevice tunnel is 
 | install / uninstall / launch | `adb install -r`, `adb uninstall`, `cmd package resolve-activity` + `am start -n` | sim: `simctl install/uninstall/launch`, device: `devicectl device install app / uninstall app / process launch` |
 | logs | `adb logcat -v time` (+ `--pid=$(pidof pkg)` for one app) | sim: `simctl spawn UDID log stream` (+ `--predicate 'process == NAME'`), device: `idevicesyslog -u UDID` (+ `-p NAME`, per the libimobiledevice docs; untested here) |
 | wifi / pair | `adb tcpip 5555`, `adb connect`, `adb pair`, `adb disconnect` | `devicectl manage pair`, `devicectl device info details` (opens the tunnel) |
-| proxy | `adb shell settings put global http_proxy HOST:PORT` (`:0` clears it); certificate by `adb push` into the system store where the image allows it, otherwise the user store | sim: `simctl keychain add-root-cert`, plus this Mac's `networksetup -setwebproxy` / `-setsecurewebproxy`; device: a CMS-signed `.mobileconfig` carrying the root and the proxy, sent with `devicectl device profile install` (devicectl reads an unsigned one as a provisioning profile and refuses it) |
+| proxy | `adb shell settings put global http_proxy HOST:PORT` (`:0` clears it); certificate by `adb push` into the system store where the image allows it, otherwise the user store | sim: `simctl keychain add-root-cert`, plus this Mac's `networksetup -setwebproxy` / `-setsecurewebproxy`; device: a CMS-signed `.mobileconfig` carrying the root and the proxy, served at `http://<mac>:<port>/sims-proxy.mobileconfig` from the capture's own listener for Safari on the phone to fetch (devicectl has no command that installs one) |
 | images | `sdkmanager --list` | `simctl list runtimes --json` |
 | create | `avdmanager create avd -n -k -d`, then `hw.keyboard = yes` and the chosen `hw.ramSize` / `hw.cpu.ncore` / `disk.dataPartition.size` in `config.ini` | `simctl create NAME TYPE RUNTIME` |
 | device types | `avdmanager list device -c`; screen size from `<sdk>/skins/<id>/layout` when that skin is installed | `simctl list devicetypes --json`; screen size from each type's `profile.plist` |

@@ -17,9 +17,24 @@ import (
 	"github.com/siner308/sims/internal/device"
 )
 
-type Provider struct{}
+type Provider struct {
+	// runDevicectl is swapped out by tests, which have no phone to launch anything on.
+	runDevicectl func(ctx context.Context, args ...string) error
+}
 
-func New() *Provider { return &Provider{} }
+func New() *Provider { return &Provider{runDevicectl: devicectl} }
+
+// OpenSettings brings the Settings app to the front, where a downloaded profile waits to be installed.
+func (p *Provider) OpenSettings(ctx context.Context, d device.Device) error {
+	if d.Kind == device.KindPhysical {
+		if err := reachable(d); err != nil {
+			return err
+		}
+		return p.runDevicectl(ctx, "device", "process", "launch", "--device", d.ID, "com.apple.Preferences")
+	}
+	_, err := simctl(ctx, "launch", d.ID, "com.apple.Preferences")
+	return err
+}
 
 func (p *Provider) Platform() device.Platform { return device.PlatformIOS }
 

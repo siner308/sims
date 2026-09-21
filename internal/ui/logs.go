@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"golang.org/x/term"
 
 	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
@@ -39,6 +41,8 @@ type logsView struct {
 	nowrap bool
 	// noFollow stops the view jumping to the end as lines arrive, even while it is sitting there.
 	noFollow bool
+	// following tracks whether the mixed stream is stuck to the newest exchange, kept as state because a wrapped exchange is several screen rows but one source line, so a scroll-position check cannot tell "at the end" from "stepped up".
+	following bool
 	// stepped is set once the reader has moved the cursor themselves, after which it stays put.
 	stepped bool
 	// waiting is set while the runner shows in the status bar; only the UI goroutine touches it
@@ -71,7 +75,7 @@ func newTrafficView(a *App, d device.Device, only *device.App, s *capture.Sessio
 }
 
 func newLogsView(a *App, d device.Device, only *device.App) *logsView {
-	v := &logsView{app: a, dev: d, only: only, opened: map[string]detail{}}
+	v := &logsView{app: a, dev: d, only: only, opened: map[string]detail{}, following: true}
 	v.text = tview.NewTextView().SetDynamicColors(true).SetScrollable(true).SetMaxLines(logBuffer)
 	// regions mark each exchange so n and N can step between them and o can open the one selected
 	v.text.SetRegions(true)
@@ -113,7 +117,7 @@ func (v *logsView) Hints() []hint {
 		return append(append(hints, groupBreak), layers...)
 	}
 	return append(append(hints, groupBreak,
-		hint{"up/down", "step exchanges"}, hint{"o", "open headers, then body"},
+		hint{"up/down", "step exchanges"}, hint{"pgup/pgdn", "page"}, hint{"g/shift+g", "first/last"}, hint{"y", "types"}, hint{"o", "open headers, then body"},
 		hint{"O", "open every exchange"}, hint{"enter", "read"}, hint{"v", "open the body"},
 		hint{"e", "open in an editor"}, hint{"shift+e", "pick another editor"},
 		groupBreak),
@@ -279,6 +283,95 @@ func (v *logsView) selectedFlow() (proxy.Flow, bool) {
 // step moves the cursor to the next exchange in the stream, or the previous one. With no cursor yet
 // it starts at the last exchange, which is the one the reader is watching arrive.
 func (v *logsView) step(forward bool) {
+	at := v.cursorIndex()
+	switch {
+	case at < 0:
+		at = lastIndex
+	case forward:
+		at++
+	default:
+		at--
+	}
+	v.moveTo(at)
+}
+
+// a third of the screen height in entries pages briskly without overshooting even when every exchange is a single row
+func (v *logsView) pageBy(forward bool) {
+	_, _, _, height := v.text.GetInnerRect()
+	stepN := max(1, height/3)
+	at := v.cursorIndex()
+	if at < 0 {
+		at = lastIndex
+	}
+	if at == lastIndex {
+		at = len(v.exchanges()) - 1
+	}
+	if forward {
+		v.moveTo(at + stepN)
+	} else {
+		v.moveTo(at - stepN)
+	}
+}
+
+// lastIndex tells moveTo "the newest exchange" without the caller counting them; -1 already means "none selected" elsewhere, so this is a second sentinel.
+const lastIndex = -2
+
+// innerWidth is the column count the stream wraps at. tview's own GetInnerRect reports the width only while it is drawing, so the real terminal is asked directly; the border and one column of padding on each side come off, and a floor keeps the wrap math sane when neither source knows the size.
+func (v *logsView) innerWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return max(20, w-4)
+	}
+	if _, _, w, _ := v.text.GetRect(); w > 4 {
+		return w - 4
+	}
+	return 80
+}
+
+// wrappedRows counts the screen rows a written line takes once tview wraps it at width; region and colour tags do not print and are not counted, and a line still owns one row when it is empty.
+func wrappedRows(text string, width int, nowrap bool) int {
+	if nowrap || width <= 1 {
+		return strings.Count(text, "\n") + 1
+	}
+	rows := 0
+	for _, sub := range strings.Split(text, "\n") {
+		w := tview.TaggedStringWidth(sub)
+		n := (w + width - 1) / width
+		if n < 1 {
+			n = 1
+		}
+		rows += n
+	}
+	return rows
+}
+
+// clampTop returns the scroll offset that keeps the cursor's rows on screen without leaving the buffer.
+func clampTop(top, cursorStart, cursorRows, total, height int) int {
+	if cursorStart < top {
+		top = cursorStart
+	}
+	if cursorStart+cursorRows > top+height {
+		top = cursorStart + cursorRows - height
+	}
+	if top > total-height {
+		top = total - height
+	}
+	if top < 0 {
+		top = 0
+	}
+	return top
+}
+
+func (v *logsView) cursorIndex() int {
+	for i, e := range v.exchanges() {
+		if entryID(e) == v.cursor {
+			return i
+		}
+	}
+	return -1
+}
+
+// following resumes only on the newest exchange, so new arrivals never yank a reader off an older one
+func (v *logsView) moveTo(at int) {
 	if !v.mixing() {
 		return
 	}
@@ -287,26 +380,15 @@ func (v *logsView) step(forward bool) {
 		v.app.flash("no exchanges yet")
 		return
 	}
-	at := -1
-	for i, e := range ex {
-		if entryID(e) == v.cursor {
-			at = i
-			break
-		}
-	}
-	switch {
-	case at < 0:
-		// nothing selected yet: start at the newest exchange, which is the one arriving now
+	if at == lastIndex || at > len(ex)-1 {
 		at = len(ex) - 1
-	case forward:
-		at = min(at+1, len(ex)-1)
-	default:
-		at = max(at-1, 0)
+	}
+	if at < 0 {
+		at = 0
 	}
 	v.cursor, v.stepped = entryID(ex[at]), true
+	v.following = at == len(ex)-1
 	v.redraw()
-	v.text.Highlight(v.cursor)
-	v.text.ScrollToHighlight()
 }
 
 // openMore shows more of the selected exchange in place: its headers, then its body, then back to
@@ -328,8 +410,6 @@ func (v *logsView) openMore() {
 		v.opened[v.cursor] = next
 	}
 	v.redraw()
-	v.text.Highlight(v.cursor)
-	v.text.ScrollToHighlight()
 }
 
 // readSelected opens the exchange in full. editor sends it straight out to $EDITOR; otherwise it
@@ -389,6 +469,9 @@ func (v *logsView) visibleEntries() []entry {
 			continue
 		}
 		if !e.matches(v.filter) {
+			continue
+		}
+		if e.kind != entryLog && v.app.hiddenTypes[e.flow.Resource()] {
 			continue
 		}
 		out = append(out, e)
@@ -580,23 +663,35 @@ func (v *logsView) followCursor(following bool) {
 // only a view that was already at the end keeps following new lines.
 func (v *logsView) redraw() {
 	row, _ := v.text.GetScrollOffset()
-	_, _, _, height := v.text.GetInnerRect()
-	atEnd := !v.noFollow && row+height >= v.text.GetOriginalLineCount()
-	v.followCursor(atEnd)
+	following := v.following && !v.noFollow
+	if !v.mixing() {
+		// a plain log is short lines that mostly do not wrap, so the source-line count is close enough to the screen position to tell whether the view is sitting at the bottom
+		_, _, _, height := v.text.GetInnerRect()
+		following = !v.noFollow && row+height >= v.text.GetOriginalLineCount()
+	}
+	v.followCursor(following)
 	v.text.Clear()
+	width := v.innerWidth()
+	cursorStart, cursorRows, total := -1, 1, 0
 	if v.mixing() {
 		for _, e := range v.visibleEntries() {
 			id := entryID(e)
 			if id == "" {
-				fmt.Fprintln(v.text, e.render(v.filter, detailLine))
+				text := e.render(v.filter, detailLine)
+				fmt.Fprintln(v.text, text)
+				total += wrappedRows(text, width, v.nowrap)
 				continue
 			}
 			text := e.render(v.filter, v.opened[id])
 			if id == v.cursor {
 				text = cursorMark + text
 			}
-			// the region wraps the whole entry so ScrollToHighlight lands on its first line
 			fmt.Fprintf(v.text, "[\"%s\"]%s[\"\"]\n", id, text)
+			rows := wrappedRows(text, width, v.nowrap)
+			if id == v.cursor {
+				cursorStart, cursorRows = total, rows
+			}
+			total += rows
 		}
 	} else {
 		v.mu.Lock()
@@ -608,17 +703,25 @@ func (v *logsView) redraw() {
 			}
 		}
 	}
-	if atEnd {
-		v.text.ScrollToEnd()
-	} else {
-		v.text.ScrollTo(row, 0)
-	}
 	if v.cursor != "" {
 		v.text.Highlight(v.cursor)
+	}
+	// scroll ourselves with ScrollTo rather than ScrollToHighlight: ScrollToHighlight centres the cursor to a negative line offset when it sits in the top half, and tview then parses only half a screen past it, blanking the lower rows. ScrollTo parses a full screen from the offset given, so a non-negative offset always fills.
+	_, _, _, height := v.text.GetInnerRect()
+	switch {
+	case following:
+		v.text.ScrollToEnd()
+	case cursorStart >= 0:
+		v.text.ScrollTo(clampTop(row, cursorStart, cursorRows, total, height), 0)
+	default:
+		v.text.ScrollTo(row, 0)
 	}
 	title := v.title()
 	if v.filter != "" {
 		title += fmt.Sprintf("/%s ", v.filter)
+	}
+	if v.mixing() {
+		title += v.app.typesNote()
 	}
 	if v.paused {
 		title += "[paused] "
@@ -665,13 +768,19 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			v.opened = map[string]detail{}
 			v.cursor, v.stepped = "", false
 		}
+		v.following = true
 		v.text.Clear()
 	case 'p':
 		v.paused = !v.paused
 		v.redraw()
+	case 'y':
+		if v.mixing() {
+			v.app.push(newTypesView(v.app, func() []proxy.Flow { return v.session.Flows() }))
+		}
 	case 'f':
 		v.noFollow = !v.noFollow
 		if !v.noFollow {
+			v.following = true
 			v.text.ScrollToEnd()
 		}
 		v.redraw()
@@ -684,9 +793,19 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.text.SetWrap(!v.nowrap)
 		v.redraw()
 	case 'g':
-		v.text.ScrollToBeginning()
+		if v.mixing() {
+			v.moveTo(0)
+		} else {
+			v.following = false
+			v.text.ScrollToBeginning()
+		}
 	case 'G':
-		v.text.ScrollToEnd()
+		if v.mixing() {
+			v.moveTo(lastIndex)
+		} else {
+			v.following = true
+			v.text.ScrollToEnd()
+		}
 	case 'r':
 		v.Refresh()
 	case 't':
@@ -715,6 +834,16 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		case tcell.KeyUp:
 			if v.mixing() {
 				v.step(false)
+				return nil
+			}
+		case tcell.KeyPgDn:
+			if v.mixing() {
+				v.pageBy(true)
+				return nil
+			}
+		case tcell.KeyPgUp:
+			if v.mixing() {
+				v.pageBy(false)
 				return nil
 			}
 		case tcell.KeyEnter:

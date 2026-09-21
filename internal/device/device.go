@@ -314,6 +314,10 @@ type ProxyTarget struct {
 	SSID string
 	// Signer wraps a phone's configuration profile in CMS, which iOS requires before it will read one.
 	Signer ProfileSigner
+	// Publish puts a file where the device's browser can fetch it and returns that URL; an iPhone takes its configuration profile this way. Nil when nothing is listening for it.
+	Publish func(name, contentType string, body []byte) (string, error)
+	// Installed says the device already carries this target's profile from an earlier capture, so a provider reports that instead of installing it again.
+	Installed bool
 }
 
 // ProfileSigner signs a configuration profile. The proxy's CA implements it.
@@ -334,6 +338,13 @@ type ProxyStep struct {
 	// Detail carries what the user has to do when Manual is set, or what sims did when it is not.
 	Detail string `json:"detail,omitempty"`
 	Manual bool   `json:"manual"`
+	// Todo spells a manual step out, one tap or screen per entry, in the order they happen.
+	Todo []string `json:"todo,omitempty"`
+}
+
+// SettingsOpener brings up the device's Settings app, where a step only the device's owner can do is finished.
+type SettingsOpener interface {
+	OpenSettings(ctx context.Context, d Device) error
 }
 
 // ProxyState is what a device currently reports about its proxy configuration.

@@ -496,10 +496,12 @@ func captureNote(d device.Device) string {
 			"while the capture runs. Other apps on the Mac keep working: their traffic is relayed\n" +
 			"untouched and is not captured. Everything goes back when you stop."
 	case d.Kind == device.KindPhysical && d.Platform == device.PlatformIOS:
-		return "sims sends the phone a profile carrying its certificate and the proxy setting.\n" +
-			"You approve it in Settings, then switch the certificate on under Certificate Trust Settings."
+		return "sims serves a profile carrying its certificate and the proxy setting, and opens it in\n" +
+			"Safari on the phone. You tap Allow there, install it in Settings (sims offers to open\n" +
+			"that), then switch the certificate on. The taps follow once the capture is up."
 	case d.Kind == device.KindPhysical:
 		return "sims points the phone at this machine and pushes its certificate.\n" +
+			"On a phone without root you pick the certificate from Downloads yourself; the taps follow.\n" +
 			"A release build that does not trust user certificates still shows as unread traffic."
 	}
 	return "sims points the emulator at itself and installs its certificate.\n" +

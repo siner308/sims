@@ -54,7 +54,7 @@ func (v *flowsView) Primitive() tview.Primitive { return v.table }
 func (v *flowsView) Hints() []hint {
 	return []hint{
 		{"enter", "read"}, {"v", "open the body"}, {"e", "open in an editor"},
-		{"shift+e", "pick another editor"}, {"/", "filter"}, {"c", "clear"}, {"p", "pause"},
+		{"shift+e", "pick another editor"}, {"/", "filter"}, {"y", "types"}, {"c", "clear"}, {"p", "pause"},
 		{"d", "device only"}, {"s", "save har"}, {"l", "mix with the log"},
 		groupBreak,
 		{"g", "group by domain"}, {"space", "fold a domain"}, {"shift+g", "fold or unfold all"},
@@ -130,6 +130,9 @@ func (v *flowsView) visible() []proxy.Flow {
 		if v.filter != "" && !strings.Contains(strings.ToLower(f.URL+f.Method+f.Process), strings.ToLower(v.filter)) {
 			continue
 		}
+		if v.app.hiddenTypes[f.Resource()] {
+			continue
+		}
 		out = append(out, f)
 	}
 	return out
@@ -145,7 +148,7 @@ func (v *flowsView) render() {
 		selectedID = f.ID
 	}
 	v.table.Clear()
-	setHeader(v.table, "", "WHEN", "METHOD", "STATUS", "HOST", "PATH", "SIZE", "TOOK", "FROM")
+	setHeader(v.table, "", "WHEN", "METHOD", "STATUS", "TYPE", "HOST", "PATH", "SIZE", "TOOK", "FROM")
 	row, want := 1, 1
 	flows := v.visible()
 	for _, f := range flows {
@@ -156,11 +159,12 @@ func (v *flowsView) render() {
 		v.table.SetCell(row, 1, tview.NewTableCell(clockCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(13))
 		v.table.SetCell(row, 2, tview.NewTableCell(highlight(f.Method, v.filter)).SetMaxWidth(7))
 		v.table.SetCell(row, 3, tview.NewTableCell(statusCell(f)).SetMaxWidth(7))
-		v.table.SetCell(row, 4, tview.NewTableCell(highlight(hostOf(f), v.filter)))
-		v.table.SetCell(row, 5, tview.NewTableCell(highlight(pathOf(f), v.filter)).SetExpansion(2))
-		v.table.SetCell(row, 6, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
-		v.table.SetCell(row, 7, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(8))
-		v.table.SetCell(row, 8, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
+		v.table.SetCell(row, 4, tview.NewTableCell(string(f.Resource())).SetTextColor(tcell.ColorGray).SetMaxWidth(5))
+		v.table.SetCell(row, 5, tview.NewTableCell(highlight(hostOf(f), v.filter)))
+		v.table.SetCell(row, 6, tview.NewTableCell(highlight(pathOf(f), v.filter)).SetExpansion(2))
+		v.table.SetCell(row, 7, tview.NewTableCell(sizeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(9))
+		v.table.SetCell(row, 8, tview.NewTableCell(timeCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(8))
+		v.table.SetCell(row, 9, tview.NewTableCell(fromCell(f)).SetTextColor(tcell.ColorGray).SetMaxWidth(16))
 		row++
 	}
 	if row == 1 {
@@ -402,6 +406,7 @@ func (v *flowsView) title() string {
 	if v.filter != "" {
 		title += fmt.Sprintf("/%s ", v.filter)
 	}
+	title += v.app.typesNote()
 	if v.paused {
 		title += "[paused] "
 	}
@@ -450,6 +455,8 @@ func (v *flowsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		v.toggleGroup()
 	case '/':
 		v.app.prompt("filter:", v.filter, func(s string) { v.filter = s; v.render() })
+	case 'y':
+		v.app.push(newTypesView(v.app, func() []proxy.Flow { return v.flows }))
 	case 'c':
 		v.session.Store.Clear()
 		v.reload()

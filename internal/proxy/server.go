@@ -65,6 +65,46 @@ type Server struct {
 	hijackedMu sync.Mutex
 	hijacked   map[net.Conn]struct{}
 	closed     bool
+
+	publishedMu sync.Mutex
+	published   map[string]*published
+}
+
+type published struct {
+	contentType string
+	body        []byte
+	fetched     chan struct{}
+	once        sync.Once
+}
+
+// Publish answers a request for path that addresses the proxy directly rather than going through it: a phone's browser fetches its configuration profile that way, before any proxy is set on it.
+// The channel closes on the first fetch.
+func (s *Server) Publish(path, contentType string, body []byte) <-chan struct{} {
+	s.publishedMu.Lock()
+	defer s.publishedMu.Unlock()
+	if s.published == nil {
+		s.published = map[string]*published{}
+	}
+	p := &published{contentType: contentType, body: body, fetched: make(chan struct{})}
+	s.published[path] = p
+	return p.fetched
+}
+
+func (s *Server) servePublished(w http.ResponseWriter, r *http.Request) bool {
+	s.publishedMu.Lock()
+	p := s.published[r.URL.Path]
+	s.publishedMu.Unlock()
+	if p == nil {
+		return false
+	}
+	w.Header().Set("Content-Type", p.contentType)
+	w.Header().Set("Content-Length", fmt.Sprint(len(p.body)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		w.Write(p.body)
+	}
+	p.once.Do(func() { close(p.fetched) })
+	return true
 }
 
 // track registers a hijacked connection and reports whether the server is still open. A connection
@@ -242,6 +282,10 @@ func (s *Server) handleOuter(w http.ResponseWriter, r *http.Request) {
 	ignore := infoFrom(r.Context()).resolve(r.Context()).Ignore
 	if r.Method == http.MethodConnect {
 		s.handleConnect(w, r, ignore)
+		return
+	}
+	// before the ignore branch: a relative URL was addressed to this server itself, and relaying it would send it back here
+	if !r.URL.IsAbs() && s.servePublished(w, r) {
 		return
 	}
 	if ignore {

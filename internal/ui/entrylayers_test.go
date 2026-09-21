@@ -82,6 +82,15 @@ func TestASetupStepTheCaptureCannotDoIsShownBeforeTheStream(t *testing.T) {
 		t.Errorf("a step sims did itself was read back as homework: %q", left)
 	}
 
+	left = manualSteps([]device.ProxyStep{
+		{Title: "approve", Detail: "install the profile", Manual: true, Todo: []string{"open Settings", "tap Install", "tap Done"}},
+		{Title: "trust", Detail: "switch the certificate on", Manual: true, Todo: []string{"open Certificate Trust Settings"}},
+	})
+	want := "1. install the profile\n   - open Settings\n   - tap Install\n   - tap Done\n2. switch the certificate on\n   - open Certificate Trust Settings"
+	if left != want {
+		t.Errorf("taps are not listed under their step:\n%s\nwant:\n%s", left, want)
+	}
+
 	prov := &proxyProvider{
 		fakeProvider: &fakeProvider{platform: device.PlatformDesktop, devices: []device.Device{hostDevice()}},
 		steps: []device.ProxyStep{

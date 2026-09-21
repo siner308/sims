@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
@@ -20,8 +22,70 @@ import (
 
 func (c *cli) proxyCmd() *cobra.Command {
 	cmd := group("proxy", "Watch a device's HTTP traffic", "traffic")
-	cmd.AddCommand(c.proxyRunCmd(), c.proxyCACmd(), c.proxyCleanCmd())
+	cmd.AddCommand(c.proxyRunCmd(), c.proxyCACmd(), c.proxyCleanCmd(), c.proxyStandbyCmd())
 	return cmd
+}
+
+func (c *cli) proxyStandbyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "standby <phone>",
+		Short: "Relay an iPhone's traffic untouched, so a phone whose profile points here keeps its network",
+		Long: "An iPhone's profile keeps sending its traffic to this Mac after a capture ends, and only the phone's owner can remove it.\n" +
+			"This listens on that port and passes everything through unread until interrupted. The TUI does the same while it is open.",
+		Args: cobra.ExactArgs(1),
+		RunE: c.run(func(ctx context.Context, args []string) error {
+			d, err := c.resolve(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			rec, err := c.Manager.StartStandby(ctx, d)
+			if err != nil {
+				return err
+			}
+			defer c.Manager.StopStandby(d)
+			fmt.Fprintf(c.Err, "relaying %s untouched on port %d; press ctrl+c to stop\n", d.Name, rec.Port)
+			ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+			defer cancel()
+			<-ctx.Done()
+			return nil
+		}),
+	}
+	return cmd
+}
+
+// asks before opening Settings: Safari fetches the profile before its Allow prompt is answered, so opening Settings on the fetch alone would cover that prompt
+func (c *cli) settingsAfterFetch(ctx context.Context, d device.Device, fetched <-chan struct{}) {
+	select {
+	case <-fetched:
+	case <-ctx.Done():
+		return
+	}
+	fmt.Fprintln(c.Err, "   Safari on the phone has the profile")
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+	fmt.Fprintln(c.Err, "   once you have tapped Allow, press enter here and sims opens Settings on the phone")
+	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
+		return
+	}
+	if err := c.Manager.OpenSettings(ctx, d); err != nil {
+		fmt.Fprintln(c.Err, "sims:", err)
+		return
+	}
+	fmt.Fprintln(c.Err, "   Settings is open on the phone: tap Profile Downloaded at the top, then Install")
+}
+
+func printSteps(w io.Writer, steps []device.ProxyStep) {
+	for _, s := range steps {
+		mark := " "
+		if s.Manual {
+			mark = "!"
+		}
+		fmt.Fprintf(w, " %s %-12s %s\n", mark, s.Title, s.Detail)
+		for i, tap := range s.Todo {
+			fmt.Fprintf(w, "%16s%d. %s\n", "", i+1, tap)
+		}
+	}
 }
 
 func (c *cli) proxyRunCmd() *cobra.Command {
@@ -32,6 +96,8 @@ func (c *cli) proxyRunCmd() *cobra.Command {
 		duration time.Duration
 		maxBody  int
 		all      bool
+		ssid     string
+		setup    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run <device>",
@@ -46,10 +112,12 @@ func (c *cli) proxyRunCmd() *cobra.Command {
 				return err
 			}
 			return c.runProxy(ctx, d, proxyRunOptions{
-				port: port, harPath: harPath, quiet: quiet, duration: duration, maxBody: maxBody, all: all,
+				port: port, harPath: harPath, quiet: quiet, duration: duration, maxBody: maxBody, all: all, ssid: ssid, setup: setup,
 			})
 		}),
 	}
+	cmd.Flags().StringVar(&ssid, "ssid", "", "the wifi network an iPhone is on, when this Mac is not on it too")
+	cmd.Flags().BoolVar(&setup, "setup", false, "send an iPhone its profile again, for a phone that lost it")
 	cmd.Flags().IntVar(&port, "port", 0, "listen on this port instead of a free one")
 	cmd.Flags().StringVar(&harPath, "har", "", "write the captured flows to this HAR file on exit")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "do not print each request; useful with --har")
@@ -66,6 +134,8 @@ type proxyRunOptions struct {
 	duration time.Duration
 	maxBody  int
 	all      bool
+	ssid     string
+	setup    bool
 }
 
 func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) error {
@@ -73,10 +143,14 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 	if o.all {
 		scope = capture.ScopeAll
 	}
+	if o.ssid == "" {
+		o.ssid = currentSSID(ctx)
+	}
 	session, err := c.Manager.StartCapture(ctx, d, capture.Options{
 		Port:    o.port,
 		MaxBody: o.maxBody,
-		SSID:    currentSSID(ctx),
+		SSID:    o.ssid,
+		Setup:   o.setup,
 		Scope:   scope,
 	})
 	if err != nil {
@@ -91,14 +165,11 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 	defer stop()
 
 	fmt.Fprintf(c.Err, "capturing %s on port %d\n", d.Name, session.Port)
-	for _, step := range session.Steps {
-		mark := " "
-		if step.Manual {
-			mark = "!"
-		}
-		fmt.Fprintf(c.Err, " %s %-12s %s\n", mark, step.Title, step.Detail)
-	}
+	printSteps(c.Err, session.Steps)
 	fmt.Fprintln(c.Err, "   press ctrl+c to stop and put everything back")
+	if session.Fetched != nil {
+		go c.settingsAfterFetch(ctx, d, session.Fetched)
+	}
 
 	// the store calls this from one goroutine per proxied connection, so the writer is shared:
 	// without a lock the lines interleave and whole records are lost
@@ -122,6 +193,9 @@ func (c *cli) runProxy(ctx context.Context, d device.Device, o proxyRunOptions) 
 		<-ctx.Done()
 	}
 	fmt.Fprintln(c.Err)
+	if rec, ok := c.Manager.PhoneRecord(d); ok {
+		fmt.Fprintf(c.Err, "   %s keeps sending its traffic to port %d; sims proxy standby %s relays it untouched, and so does the TUI while open\n", d.Name, rec.Port, d.ID)
+	}
 
 	if o.harPath != "" {
 		f, err := os.Create(o.harPath)
@@ -279,22 +353,49 @@ func (c *cli) proxyCACmd() *cobra.Command {
 			// port 0 means "the certificate only": a provider must not point the device at
 			// anything, since a device left on a dead proxy between here and a clearing call has
 			// no network at all
-			steps, err := proxier.SetProxy(ctx, d, device.ProxyTarget{
+			t := device.ProxyTarget{
 				CACert: ca.CertPEM(), CACertDER: ca.CertDER(), CertName: "sims proxy CA",
-				SSID: currentSSID(ctx),
-			})
+				SSID: currentSSID(ctx), Signer: ca,
+			}
+			var fetched <-chan struct{}
+			if d.Platform == device.PlatformIOS && d.Kind == device.KindPhysical {
+				srv := &proxy.Server{CA: ca, Store: proxy.NewStore(0)}
+				port, err := srv.Listen("0.0.0.0:0")
+				if err != nil {
+					return err
+				}
+				go srv.Serve()
+				defer srv.Close()
+				ip, err := capture.LANAddress()
+				if err != nil {
+					return err
+				}
+				t.Publish = func(name, contentType string, body []byte) (string, error) {
+					fetched = srv.Publish("/"+name, contentType, body)
+					return fmt.Sprintf("http://%s:%d/%s", ip, port, name), nil
+				}
+			}
+			steps, err := proxier.SetProxy(ctx, d, t)
 			if err != nil {
 				return err
 			}
 			if c.json {
-				return c.printJSON(steps)
-			}
-			for _, s := range steps {
-				prefix := " "
-				if s.Manual {
-					prefix = "!"
+				if err := c.printJSON(steps); err != nil {
+					return err
 				}
-				fmt.Fprintf(c.Out, "%s %-12s %s\n", prefix, s.Title, s.Detail)
+			} else {
+				printSteps(c.Out, steps)
+			}
+			if fetched == nil {
+				return nil
+			}
+			fmt.Fprintln(c.Err, "   serving the profile until the phone fetches it; ctrl+c gives up")
+			ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+			select {
+			case <-fetched:
+				c.settingsAfterFetch(ctx, d, fetched)
+			case <-ctx.Done():
 			}
 			return nil
 		}),

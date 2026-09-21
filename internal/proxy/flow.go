@@ -72,11 +72,12 @@ func (f Flow) MarshalJSON() ([]byte, error) {
 	type flowJSON Flow
 	out := struct {
 		flowJSON
-		RequestBody          string `json:"requestBody,omitempty"`
-		RequestBodyEncoding  string `json:"requestBodyEncoding,omitempty"`
-		ResponseBody         string `json:"responseBody,omitempty"`
-		ResponseBodyEncoding string `json:"responseBodyEncoding,omitempty"`
-	}{flowJSON: flowJSON(f)}
+		RequestBody          string   `json:"requestBody,omitempty"`
+		RequestBodyEncoding  string   `json:"requestBodyEncoding,omitempty"`
+		ResponseBody         string   `json:"responseBody,omitempty"`
+		ResponseBodyEncoding string   `json:"responseBodyEncoding,omitempty"`
+		Resource             Resource `json:"resource"`
+	}{flowJSON: flowJSON(f), Resource: f.Resource()}
 	out.RequestBody, out.RequestBodyEncoding = encodeBody(f.ReqHeader, f.ReqBody)
 	out.ResponseBody, out.ResponseBodyEncoding = encodeBody(f.RespHeader, f.RespBody)
 	return json.Marshal(out)

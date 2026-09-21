@@ -89,8 +89,11 @@ func (m *Manager) StartCapture(ctx context.Context, d device.Device, o capture.O
 	if old, ok := m.captures.take(d.ID); ok {
 		_ = old.Stop()
 	}
+	// a standby holds the port the phone's profile names, so it has to step aside for the capture
+	m.pauseStandby(d.ID)
 	s, err := capture.Start(ctx, p, d, o)
 	if err != nil {
+		m.resumeStandby(d.ID)
 		return nil, err
 	}
 	m.captures.put(d.ID, s)
@@ -111,7 +114,9 @@ func (m *Manager) StopCapture(d device.Device) error {
 	if !ok {
 		return fmt.Errorf("no capture is running on %s", d.Name)
 	}
-	return s.Stop()
+	err := s.Stop()
+	m.resumeStandby(d.ID)
+	return err
 }
 
 // Leftover reports a capture that was killed before it could put this machine and its device back.
@@ -148,5 +153,6 @@ func (m *Manager) StopAllCaptures() error {
 			errs = append(errs, err)
 		}
 	}
+	m.closeStandbys()
 	return errors.Join(errs...)
 }

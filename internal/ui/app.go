@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/siner308/sims/internal/capture"
 	"github.com/siner308/sims/internal/device"
+	"github.com/siner308/sims/internal/proxy"
 	"github.com/siner308/sims/internal/sims"
 	"github.com/siner308/sims/internal/update"
 )
@@ -50,6 +52,9 @@ func closeView(v view) {
 }
 
 type App struct {
+	ssid string
+	// hiddenTypes are the resource buckets the traffic views leave out; shared so the table and the mixed stream agree.
+	hiddenTypes map[proxy.Resource]bool
 	tv          *tview.Application
 	root        *tview.Flex
 	header      *header
@@ -77,11 +82,12 @@ type App struct {
 func New(version string, m *sims.Manager) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
-		tv:      tview.NewApplication(),
-		m:       m,
-		ctx:     ctx,
-		cancel:  cancel,
-		version: version,
+		tv:          tview.NewApplication(),
+		m:           m,
+		hiddenTypes: map[proxy.Resource]bool{},
+		ctx:         ctx,
+		cancel:      cancel,
+		version:     version,
 	}
 	a.build()
 	return a
@@ -159,7 +165,24 @@ func (a *App) Run() error {
 		a.m.StopAllCaptures()
 		a.tv.Stop()
 	}()
+	a.startStandbys()
 	return a.tv.Run()
+}
+
+func (a *App) startStandbys() {
+	relayed, err := a.m.StartStandbys(a.ctx)
+	if err != nil {
+		a.flashErr(err)
+		return
+	}
+	if len(relayed) == 0 {
+		return
+	}
+	var names []string
+	for _, rec := range relayed {
+		names = append(names, fmt.Sprintf("%s (:%d)", rec.Device.Name, rec.Port))
+	}
+	a.flash("relaying " + strings.Join(names, ", ") + " untouched until a capture starts")
 }
 
 // CheckUpdates asks latest for the newest release off the UI goroutine and, when it is ahead of the
@@ -376,17 +399,40 @@ func (a *App) wirelessCommand(fields []string) {
 // capture could not do itself are surfaced here, because a user who is not told will wait for
 // traffic that cannot arrive.
 func (a *App) startCapture(d device.Device, scope capture.Scope, then func(*capture.Session)) {
+	ssid := currentSSID(a.ctx)
+	if rec, ok := a.m.PhoneRecord(d); ok && ssid == "" {
+		ssid = rec.SSID
+	}
+	// devicectl does not report which wifi network the phone is on, and a Mac on a cable cannot see it either, so the owner is asked
+	if ssid == "" && d.Kind == device.KindPhysical && d.Platform == device.PlatformIOS {
+		a.prompt("wifi network "+d.Name+" is on (this Mac is not on wifi):", a.ssid, func(typed string) {
+			if typed == "" {
+				a.flashErr(errors.New("a phone capture needs the name of the wifi network it is on"))
+				return
+			}
+			a.ssid = typed
+			a.startCaptureOn(d, scope, typed, then)
+		})
+		return
+	}
+	a.startCaptureOn(d, scope, ssid, then)
+}
+
+func (a *App) startCaptureOn(d device.Device, scope capture.Scope, ssid string, then func(*capture.Session)) {
 	a.setStatus(" setting " + d.Name + " up behind the proxy...")
 	var session *capture.Session
 	a.async(func() error {
 		var err error
-		session, err = a.m.StartCapture(a.ctx, d, capture.Options{SSID: currentSSID(a.ctx), Scope: scope})
+		session, err = a.m.StartCapture(a.ctx, d, capture.Options{SSID: ssid, Scope: scope})
 		return err
 	}, func() {
 		// the capture started, so an older message has nothing to say about it
 		a.clearStatus()
 		if manual := manualSteps(session.Steps); manual != "" {
-			a.confirm("capturing "+d.Name+", but it needs you first:\n\n"+manual, func() { then(session) })
+			a.confirm("capturing "+d.Name+", but it needs you first:\n\n"+manual, func() {
+				then(session)
+				a.offerSettings(d, session)
+			})
 			return
 		}
 		a.flash("capturing " + d.Name + " on port " + fmt.Sprint(session.Port))
@@ -394,11 +440,38 @@ func (a *App) startCapture(d device.Device, scope capture.Scope, then func(*capt
 	})
 }
 
+// asks before opening Settings: Safari fetches the profile before its Allow prompt is answered, so opening Settings on the fetch alone would cover that prompt
+func (a *App) offerSettings(d device.Device, s *capture.Session) {
+	if s.Fetched == nil {
+		return
+	}
+	go func() {
+		select {
+		case <-s.Fetched:
+		case <-a.ctx.Done():
+			return
+		}
+		a.tv.QueueUpdateDraw(func() {
+			a.confirm("Safari on "+d.Name+" has the profile. Tapped Allow already?\n\nYes opens Settings on the phone, where the profile waits at the top.", func() {
+				a.async(func() error { return a.m.OpenSettings(a.ctx, d) }, func() {
+					a.flash("Settings is open on " + d.Name + ": tap Profile Downloaded, then Install")
+				})
+			})
+		})
+	}()
+}
+
 func manualSteps(steps []device.ProxyStep) string {
 	var out []string
+	n := 0
 	for _, s := range steps {
-		if s.Manual {
-			out = append(out, fmt.Sprintf("%d. %s", len(out)+1, s.Detail))
+		if !s.Manual {
+			continue
+		}
+		n++
+		out = append(out, fmt.Sprintf("%d. %s", n, s.Detail))
+		for _, tap := range s.Todo {
+			out = append(out, "   - "+tap)
 		}
 	}
 	return strings.Join(out, "\n")

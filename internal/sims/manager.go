@@ -22,6 +22,7 @@ type Manager struct {
 	providers map[device.Platform]device.Provider
 	missing   map[device.Platform]error
 	captures  captures
+	standbys  standbys
 }
 
 // New keeps every provider for doctor to probe but routes work only to those whose toolchain is present.
@@ -139,6 +140,19 @@ func (m *Manager) Resolve(ctx context.Context, ref string, platform device.Platf
 
 func (m *Manager) provider(d device.Device) (device.Provider, error) {
 	return m.Provider(d.Platform)
+}
+
+// OpenSettings brings up the device's Settings app, for a step only its owner can finish there.
+func (m *Manager) OpenSettings(ctx context.Context, d device.Device) error {
+	p, err := m.provider(d)
+	if err != nil {
+		return err
+	}
+	o, ok := p.(device.SettingsOpener)
+	if !ok {
+		return fmt.Errorf("%s cannot open Settings from here", d.Platform)
+	}
+	return o.OpenSettings(ctx, d)
 }
 
 func (m *Manager) Boot(ctx context.Context, d device.Device) error {

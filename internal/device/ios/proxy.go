@@ -19,7 +19,8 @@ import (
 
 // A simulator has no network settings of its own: it uses this machine's, so pointing it at a proxy
 // means setting the macOS system proxy, and every other app on the Mac follows. A phone carries its
-// own settings and takes a configuration profile instead.
+// own settings and takes a configuration profile instead, which Safari on the phone fetches from a URL sims serves.
+// Nothing installs one from here: devicectl in Xcode 26.6 has no profile command (its device subcommands are copy, info, install app, process, reboot, sysdiagnose and uninstall app), and libimobiledevice ships none.
 
 // SetProxy installs the CA and, for a phone, the proxy setting that comes with it. The system proxy
 // a simulator needs is not this provider's to set: the caller owns it, because it is machine-wide.
@@ -46,12 +47,15 @@ func (p *Provider) SetProxy(ctx context.Context, d device.Device, t device.Proxy
 	}, nil
 }
 
-// installProfile hands the phone a configuration profile carrying the root certificate and a global
-// HTTP proxy. iOS asks the person to approve it in Settings, and a root still has to be switched on
-// under Certificate Trust Settings; neither can be done from here.
 func (p *Provider) installProfile(ctx context.Context, d device.Device, t device.ProxyTarget) ([]device.ProxyStep, error) {
 	if err := reachable(d); err != nil {
 		return nil, err
+	}
+	if t.Installed {
+		return []device.ProxyStep{{
+			Title:  "profile",
+			Detail: "already on the phone from an earlier capture; it sends the phone's traffic on " + t.SSID + " to " + t.Addr() + " and trusts " + t.CertName + ". Nothing to tap; if no traffic shows, the phone lost the profile: redo the setup with --setup",
+		}}, nil
 	}
 	if len(t.CACert) == 0 {
 		return nil, errors.New("a phone needs the certificate to install a proxy profile")
@@ -59,24 +63,44 @@ func (p *Provider) installProfile(ctx context.Context, d device.Device, t device
 	if t.Signer == nil {
 		return nil, errors.New("a phone's profile has to be signed, and no signer was given")
 	}
-	path, cleanup, err := writeSignedProfile(t, t.Signer)
+	if t.Publish == nil {
+		return nil, errors.New("a phone fetches its profile from a URL, and nothing is serving one")
+	}
+	body, err := buildProfile(t, t.Signer)
 	if err != nil {
 		return nil, err
 	}
-	defer cleanup()
-	if err := devicectl(ctx, "device", "profile", "install", "--device", d.ID, path); err != nil {
+	url, err := t.Publish(profileFileName, profileContentType, body)
+	if err != nil {
 		return nil, err
 	}
 	// a certificate-only profile carries no proxy payload, so it must not promise to send traffic
 	// anywhere: a phone told to use a proxy at nothing has no working network
-	sent := "sent to the phone; it carries the certificate and points traffic at " + t.Addr()
+	carries := "it carries the certificate and points the phone's traffic on " + t.SSID + " at " + t.Addr()
 	if t.CertOnly() {
-		sent = "sent to the phone; it carries the certificate and changes no network setting"
+		carries = "it carries the certificate and changes no network setting"
+	}
+	download := device.ProxyStep{Title: "download", Detail: "Safari on the phone is open on it; iOS asks before taking a profile", Manual: true, Todo: []string{
+		"tap Allow when Safari asks to download a configuration profile, then Close",
+	}}
+	if err := p.runDevicectl(ctx, "device", "process", "launch", "--device", d.ID, "--payload-url", url, "com.apple.mobilesafari"); err != nil {
+		download = device.ProxyStep{Title: "download", Detail: "sims could not open Safari on the phone (" + err.Error() + "); open the address there yourself, on the same wifi as this Mac", Manual: true, Todo: []string{
+			"type " + url + " into Safari's address bar",
+			"tap Allow when Safari asks to download a configuration profile, then Close",
+		}}
 	}
 	return []device.ProxyStep{
-		{Title: "profile", Detail: sent},
-		{Title: "approve it", Detail: "on the phone: Settings > General > VPN & Device Management > sims proxy > Install", Manual: true},
-		{Title: "trust the certificate", Detail: "then Settings > General > About > Certificate Trust Settings, and switch " + t.CertName + " on", Manual: true},
+		{Title: "profile", Detail: "ready at " + url + "; " + carries},
+		download,
+		{Title: "approve", Detail: "then install it; iOS only does that when you ask", Manual: true, Todo: []string{
+			`open Settings (sims offers to do this once the profile is downloaded) and tap "Profile Downloaded" at the top, or General > VPN & Device Management > sims proxy`,
+			"tap Install at the top right and enter the passcode",
+			"tap Install on the warning about the root certificate, Install once more to confirm, then Done",
+		}},
+		{Title: "trust", Detail: "then switch the certificate on, once; iOS installs a root without trusting it, and HTTPS shows as tunnel until you do. The profile stays on the phone and later captures reuse it", Manual: true, Todo: []string{
+			"open Settings > General > About > Certificate Trust Settings",
+			`switch "` + t.CertName + `" on and tap Continue`,
+		}},
 	}, nil
 }
 
@@ -86,10 +110,8 @@ func (p *Provider) ClearProxy(ctx context.Context, d device.Device) error {
 		// later capture needs no second approval
 		return nil
 	}
-	if err := reachable(d); err != nil {
-		return err
-	}
-	return devicectl(ctx, "device", "profile", "remove", "--device", d.ID, profileIdentifier)
+	// the profile stays on purpose: it names a fixed port, the next capture reuses it, and no tool on this Mac could remove it anyway
+	return nil
 }
 
 func (p *Provider) ProxyState(ctx context.Context, d device.Device) (device.ProxyState, error) {
@@ -115,7 +137,11 @@ func tempCert(pemBytes []byte) (string, func(), error) {
 	return f.Name(), func() { os.Remove(f.Name()) }, nil
 }
 
-const profileIdentifier = "dev.sims.proxy"
+const (
+	profileIdentifier  = "dev.sims.proxy"
+	profileFileName    = "sims-proxy.mobileconfig"
+	profileContentType = "application/x-apple-aspen-config"
+)
 
 // A .mobileconfig is a plist of payloads. This one carries the root certificate and a global HTTP
 // proxy, which is what a phone needs to send its traffic here and let sims open the TLS.
@@ -184,15 +210,36 @@ func writeProfile(t device.ProxyTarget) (string, func(), error) {
 	return writeSignedProfile(t, nil)
 }
 
-// writeSignedProfile builds the .mobileconfig and, when a signer is given, wraps it in CMS.
-// devicectl refuses an unsigned profile: it reads one as a provisioning profile and reports
-// "The provisioning profile CMS/PKCS#7 envelope is invalid".
 func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), error) {
+	out, err := buildProfile(t, sign)
+	if err != nil {
+		return "", nil, err
+	}
+	// a path derived from the CA alone is the same for every capture, so two running at once write
+	// and delete each other's file
+	f, err := os.CreateTemp("", "sims-proxy-*.mobileconfig")
+	if err != nil {
+		return "", nil, err
+	}
+	path := f.Name()
+	if _, err := f.Write(out); err != nil {
+		f.Close()
+		os.Remove(path)
+		return "", nil, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return "", nil, err
+	}
+	return path, func() { os.Remove(path) }, nil
+}
+
+func buildProfile(t device.ProxyTarget, sign signer) ([]byte, error) {
 	// the wifi name scopes the proxy payload; a certificate-only profile has no proxy payload and
 	// so needs no network to attach it to
 	if t.SSID == "" && !t.CertOnly() {
-		return "", nil, errors.New("a phone takes its proxy from the wifi network it is on, and this Mac is not on one; " +
-			"join the phone's wifi network, or use sims proxy ca <phone> --install and set the proxy on the phone by hand")
+		return nil, errors.New("a phone takes its proxy from the wifi network it is on, and this Mac is not on one; " +
+			"pass the phone's wifi name with --ssid, join that network on this Mac, or use sims proxy ca <phone> --install and set the proxy on the phone by hand")
 	}
 	uuid := func() (string, error) {
 		var b [16]byte
@@ -217,46 +264,30 @@ func writeSignedProfile(t device.ProxyTarget, sign signer) (string, func(), erro
 	}
 	var err error
 	if data.ProfileUUID, err = uuid(); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if data.CertUUID, err = uuid(); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if data.WiFiUUID, err = uuid(); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	tmpl, err := template.New("profile").Parse(profileTemplate)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	var body bytes.Buffer
 	if err := tmpl.Execute(&body, data); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	out := body.Bytes()
 	if sign != nil {
 		out, err = sign.SignCMS(out)
 		if err != nil {
-			return "", nil, fmt.Errorf("could not sign the profile: %w", err)
+			return nil, fmt.Errorf("could not sign the profile: %w", err)
 		}
 	}
-	// a path derived from the CA alone is the same for every capture, so two running at once write
-	// and delete each other's file
-	f, err := os.CreateTemp("", "sims-proxy-*.mobileconfig")
-	if err != nil {
-		return "", nil, err
-	}
-	path := f.Name()
-	if _, err := f.Write(out); err != nil {
-		f.Close()
-		os.Remove(path)
-		return "", nil, err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(path)
-		return "", nil, err
-	}
-	return path, func() { os.Remove(path) }, nil
+	return out, nil
 }
 
 func xmlEscape(s string) string {

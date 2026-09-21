@@ -98,12 +98,20 @@ func (p *Provider) installCA(ctx context.Context, d device.Device, t device.Prox
 	}
 	return []device.ProxyStep{{
 		Title:  "certificate",
-		Detail: "it is in Downloads as " + t.CertName + ".crt; open Settings > Security > Encryption & credentials > Install a certificate > CA certificate and pick it",
+		Detail: "it is in Downloads as " + t.CertName + ".crt; install it as a CA certificate on the phone, or HTTPS shows as tunnel",
 		Manual: true,
+		Todo: []string{
+			`open Settings and search for "CA certificate" (on a Pixel or the emulator it sits under Security & privacy > More security & privacy > Encryption & credentials > Install a certificate)`,
+			"tap CA certificate, then Install anyway, and unlock the screen when asked",
+			"pick " + t.CertName + ".crt from Downloads",
+		},
 	}, {
 		Title:  "app opt-in",
-		Detail: "an app targeting API 24+ reads a user certificate only where its network security config trusts `user`; a release build usually does not",
+		Detail: "an app built for API 24+ ignores a user certificate unless its network security config trusts `user`; a release build usually does not",
 		Manual: true,
+		Todo: []string{
+			`add <certificates src="user" /> to the app's debug network_security_config, or capture a debug build that has it`,
+		},
 	}}, nil
 }
 

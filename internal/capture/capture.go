@@ -26,6 +26,8 @@ type Session struct {
 	CA     *proxy.CA
 	// Steps is what setting the device up took, including anything left for the user to do by hand.
 	Steps []device.ProxyStep
+	// Fetched closes once a phone has taken its profile from the proxy; nil when none was published.
+	Fetched <-chan struct{}
 
 	srv     *proxy.Server
 	host    *hostProxy
@@ -36,6 +38,7 @@ type Session struct {
 	// may have left behind.
 	configured bool
 	stopped    sync.Once
+	done       chan struct{}
 
 	mu       sync.Mutex
 	serveErr error
@@ -80,6 +83,8 @@ type Options struct {
 	CertDir string
 	// SSID names the wifi network a phone's profile attaches its proxy to.
 	SSID string
+	// Setup installs a phone's profile again even when a record says the phone already has one.
+	Setup bool
 }
 
 // Start listens, points d at the proxy, and returns a running session. Whatever it managed to change
@@ -104,9 +109,16 @@ func Start(ctx context.Context, prov device.Provider, d device.Device, o Options
 		o.Scope = ScopeDevice
 	}
 	srv := &proxy.Server{CA: ca, Store: proxy.NewStore(o.MaxFlows), MaxBody: o.MaxBody}
-	s := &Session{Device: d, Store: srv.Store, CA: ca, srv: srv, prov: p, host: &hostProxy{}, scope: o.Scope, certDir: dir}
+	s := &Session{Device: d, Store: srv.Store, CA: ca, srv: srv, prov: p, host: &hostProxy{}, scope: o.Scope, certDir: dir, done: make(chan struct{})}
 	srv.Attribute = s.attribute
 
+	if o.Port == 0 && isPhone(d) {
+		// the profile on the phone names the port, and only the owner can change it, so it has to be the same one every time
+		o.Port = PhonePort
+		if rec, ok := Phone(dir, d.ID); ok {
+			o.Port = rec.Port
+		}
+	}
 	port, err := srv.Listen(fmt.Sprintf("%s:%d", listenHost(d), o.Port))
 	if err != nil {
 		return nil, err
@@ -255,6 +267,35 @@ func (s *Session) target(ctx context.Context, d device.Device, ca *proxy.CA, o O
 		}
 		t.Host = ip
 	}
+	host := t.Host
+	t.Publish = func(name, contentType string, body []byte) (string, error) {
+		s.Fetched = s.srv.Publish("/"+name, contentType, body)
+		return fmt.Sprintf("http://%s:%d/%s", host, s.Port, name), nil
+	}
+	if !isPhone(d) {
+		return t, nil
+	}
+	rec, has := Phone(s.certDir, d.ID)
+	if t.SSID == "" && has {
+		t.SSID = rec.SSID
+	}
+	if has && !o.Setup && rec.Matches(host, s.Port, t.SSID, ca.Fingerprint()) {
+		t.Installed = true
+		return t, nil
+	}
+	ssid := t.SSID
+	t.Publish = func(name, contentType string, body []byte) (string, error) {
+		s.Fetched = s.srv.Publish("/"+name, contentType, body)
+		// the taps after the download cannot be seen from here, so the fetch is what stands for "the phone has it"
+		go func() {
+			select {
+			case <-s.Fetched:
+				_ = writePhone(s.certDir, PhoneRecord{Device: d, Host: host, Port: s.Port, SSID: ssid, CertFingerprint: ca.Fingerprint(), InstalledAt: time.Now()})
+			case <-s.done:
+			}
+		}()
+		return fmt.Sprintf("http://%s:%d/%s", host, s.Port, name), nil
+	}
 	return t, nil
 }
 
@@ -341,6 +382,7 @@ func (s *Session) Addr() string { return fmt.Sprintf(":%d", s.Port) }
 func (s *Session) Stop() error {
 	var errs []error
 	s.stopped.Do(func() {
+		close(s.done)
 		// only the first Stop reports it, and it is labelled: a proxy that died is not the same
 		// news as a machine whose settings could not be put back, and the second needs acting on
 		if err := s.Err(); err != nil {

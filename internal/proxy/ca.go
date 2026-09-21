@@ -185,9 +185,7 @@ func (c *CA) Fingerprint() string {
 // NotAfter is when the root itself expires.
 func (c *CA) NotAfter() time.Time { return c.cert.NotAfter }
 
-// SignCMS wraps data in a CMS/PKCS#7 signature made with this CA. An iOS configuration profile has
-// to arrive signed: devicectl reads an unsigned one as a provisioning profile and refuses it with
-// "CMS/PKCS#7 envelope is invalid".
+// SignCMS wraps data in a CMS/PKCS#7 signature made with this CA, the form a signed iOS configuration profile takes.
 func (c *CA) SignCMS(data []byte) ([]byte, error) {
 	signed, err := pkcs7.NewSignedData(data)
 	if err != nil {
