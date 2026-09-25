@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestTail(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"[====    ] 25% Loading local repository...       \rError: Package path is not valid. Valid system image paths are:\nnull\n",
+			"Error: Package path is not valid. Valid system image paths are: null"},
+		{"first\nsecond\n", "second"},
+		{"50%\r100%\r", "100%"},
+		{"  \n", ""},
+	} {
+		if got := tail([]byte(tc.in)); got != tc.want {
+			t.Errorf("tail(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestAvdmanagerCmd_PointsToolsdirIntoSDK(t *testing.T) {
 	if isWindows {
 		t.Skip("quoting differs on windows")

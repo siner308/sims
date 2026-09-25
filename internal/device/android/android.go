@@ -530,12 +530,24 @@ func lines(s string) []string {
 	return out
 }
 
+// Progress bars redraw with \r, so it splits lines too.
+// avdmanager and sdkmanager can follow an "Error:" line with a bare detail such as "null", so the error line is kept with the few lines after it.
 func tail(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
-		return s[i+1:]
+	var lines []string
+	for _, l := range strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
 	}
-	return s
+	if len(lines) == 0 {
+		return ""
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], "Error:") {
+			return strings.Join(lines[i:min(i+3, len(lines))], " ")
+		}
+	}
+	return lines[len(lines)-1]
 }
 
 var keycodes = map[device.Key]string{
