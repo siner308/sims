@@ -206,7 +206,7 @@ func (p *Provider) Delete(ctx context.Context, d device.Device) error {
 	if d.Serial != "" {
 		return errors.New("shut down the device before deleting")
 	}
-	_, err := run(ctx, p.sdk.avdmanager(), "delete", "avd", "-n", d.ID)
+	_, err := output(p.sdk.avdmanagerCmd(ctx, "delete", "avd", "-n", d.ID))
 	return err
 }
 
@@ -419,7 +419,7 @@ func (p *Provider) Create(ctx context.Context, name string, img device.Image, de
 	if deviceType != "" {
 		args = append(args, "-d", deviceType)
 	}
-	cmd := exec.CommandContext(ctx, p.sdk.avdmanager(), args...)
+	cmd := p.sdk.avdmanagerCmd(ctx, args...)
 	cmd.Stdin = strings.NewReader("no\n")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -436,12 +436,12 @@ func (p *Provider) Create(ctx context.Context, name string, img device.Image, de
 
 // Screen size comes from the SDK's skin for the profile when one is installed; avdmanager itself only lists ids.
 func (p *Provider) DeviceTypes(ctx context.Context) ([]device.DeviceType, error) {
-	out, err := run(ctx, p.sdk.avdmanager(), "list", "device", "-c")
+	out, err := output(p.sdk.avdmanagerCmd(ctx, "list", "device", "-c"))
 	if err != nil {
 		return nil, err
 	}
 	var types []device.DeviceType
-	for _, id := range lines(out) {
+	for _, id := range lines(string(out)) {
 		if id == "" {
 			continue
 		}
@@ -497,12 +497,15 @@ func run(ctx context.Context, bin string, args ...string) (string, error) {
 }
 
 func runRaw(ctx context.Context, bin string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
+	return output(exec.CommandContext(ctx, bin, args...))
+}
+
+func output(cmd *exec.Cmd) ([]byte, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w: %s", filepath.Base(bin), strings.Join(args, " "), err, tail(stderr.Bytes()))
+		return nil, fmt.Errorf("%s %s: %w: %s", filepath.Base(cmd.Path), strings.Join(cmd.Args[1:], " "), err, tail(stderr.Bytes()))
 	}
 	return out, nil
 }

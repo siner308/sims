@@ -2,11 +2,13 @@ package android
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 var isWindows = runtime.GOOS == "windows"
@@ -52,6 +54,23 @@ func (s sdk) sdkmanager() string { return s.script("cmdline-tools", "latest", "b
 // sdkmanager installs into the SDK that contains the binary, not ANDROID_HOME; when it was found on
 // PATH (Homebrew puts it under its own prefix) that would land packages outside the SDK sims uses.
 func (s sdk) sdkRootFlag() string { return "--sdk_root=" + s.root }
+
+// avdmanager has no --sdk_root and finds the SDK from its own toolsdir, ignoring ANDROID_HOME, so a Homebrew copy fails with "Valid system image paths are: null".
+// The script applies AVDMANAGER_OPTS after its own toolsdir, and the user's own options go last so they still win.
+func (s sdk) avdmanagerCmd(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, s.avdmanager(), args...)
+	opt := "-Dcom.android.sdkmanager.toolsdir=" + filepath.Join(s.root, "cmdline-tools", "latest")
+	cmd.Env = append(os.Environ(), "AVDMANAGER_OPTS="+strings.TrimSpace(scriptQuote(opt)+" "+os.Getenv("AVDMANAGER_OPTS")))
+	return cmd
+}
+
+// The .bat wrapper pastes the value in as is, while the shell script word-splits it through eval.
+func scriptQuote(s string) string {
+	if isWindows {
+		return `"` + s + `"`
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 func (s sdk) bin(parts ...string) string {
 	p := filepath.Join(append([]string{s.root}, parts...)...)
