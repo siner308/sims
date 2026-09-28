@@ -117,9 +117,13 @@ func TestSteppingToTheTopFillsTheScreen(t *testing.T) {
 		screen.InjectKey(tcell.KeyUp, 0, tcell.ModNone)
 		time.Sleep(12 * time.Millisecond)
 	}
-	time.Sleep(200 * time.Millisecond)
-
-	f, _ := lv.selectedFlow()
+	var f proxy.Flow
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		onUI(a, func() { f, _ = lv.selectedFlow() })
+		if strings.Contains(f.URL, "id=00000000&") {
+			break
+		}
+	}
 	if !strings.Contains(f.URL, "id=00000000&") {
 		t.Fatalf("stepping up did not reach the first exchange; cursor on %s", f.URL)
 	}
