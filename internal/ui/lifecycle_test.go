@@ -113,7 +113,7 @@ func TestAnErrorSurvivesABackgroundJobFinishing(t *testing.T) {
 
 	a.tv.QueueUpdate(func() { a.flashErr(errUnderTest) })
 	// a background job completing clears the status, the way a refresh does
-	a.tv.QueueUpdate(func() { a.startSpinner("working"); a.stopSpinner() })
+	a.tv.QueueUpdate(func() { a.stopSpinner(a.startSpinner("working")) })
 
 	var status string
 	a.tv.QueueUpdate(func() { status = a.status.GetText(true) })

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -64,11 +65,16 @@ type App struct {
 	m           *sims.Manager
 	stack       []view
 	statusRows  int
-	busy        int // async jobs in flight; the runner shows while it is above zero
-	spinFrame   int
-	spinMsg     string
-	flashText   string // last flash, shown again whenever the status is cleared before flashUntil
+	// The status line is drawn only by renderStatus from these; each entry carries the statusSeq it
+	// was written at, and the newest entry still standing is what shows.
+	statusSeq   int
+	message     string // tview markup; setStatus, or the error flashErr leaves behind
+	messageSeq  int
+	flashText   string // tview markup
+	flashSeq    int
 	flashUntil  time.Time
+	spinJobs    []spinJob // in flight, oldest first; each id is the statusSeq it started at
+	spinFrame   int
 	spinStop    chan struct{}
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -143,7 +149,7 @@ func (a *App) offerLeftoverCleanup() {
 		return
 	}
 	a.confirm(l.String()+".\n\nPut it back now?", func() {
-		a.async(func() error { return a.m.CleanLeftover(a.ctx, l) }, func() {
+		a.async("", func() error { return a.m.CleanLeftover(a.ctx, l) }, func() {
 			a.flash("cleaned up after the capture that did not stop")
 			a.stack[0].Refresh()
 		})
@@ -211,8 +217,7 @@ func (a *App) runUpdate() {
 		return
 	}
 	tag := a.newVersion
-	a.setStatus(" updating to " + tag + "...")
-	a.async(func() error { return a.applyUpdate(a.ctx, tag) }, func() {
+	a.async(" updating to "+tag+"...", func() error { return a.applyUpdate(a.ctx, tag) }, func() {
 		a.newVersion = ""
 		a.header.setUpdate("")
 		a.drawHeader()
@@ -381,8 +386,7 @@ func (a *App) wirelessCommand(fields []string) {
 	if len(fields) > 2 {
 		code = fields[2]
 	}
-	a.setStatus(fmt.Sprintf(" %s %s...", verb, addr))
-	a.async(func() error {
+	a.async(fmt.Sprintf(" %s %s...", verb, addr), func() error {
 		ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 		defer cancel()
 		if verb == "pair" {
@@ -419,9 +423,8 @@ func (a *App) startCapture(d device.Device, scope capture.Scope, then func(*capt
 }
 
 func (a *App) startCaptureOn(d device.Device, scope capture.Scope, ssid string, then func(*capture.Session)) {
-	a.setStatus(" setting " + d.Name + " up behind the proxy...")
 	var session *capture.Session
-	a.async(func() error {
+	a.async(" setting "+d.Name+" up behind the proxy...", func() error {
 		var err error
 		session, err = a.m.StartCapture(a.ctx, d, capture.Options{SSID: ssid, Scope: scope})
 		return err
@@ -453,7 +456,7 @@ func (a *App) offerSettings(d device.Device, s *capture.Session) {
 		}
 		a.tv.QueueUpdateDraw(func() {
 			a.confirm("Safari on "+d.Name+" has the profile. Tapped Allow already?\n\nYes opens Settings on the phone, where the profile waits at the top.", func() {
-				a.async(func() error { return a.m.OpenSettings(a.ctx, d) }, func() {
+				a.async("", func() error { return a.m.OpenSettings(a.ctx, d) }, func() {
 					a.flash("Settings is open on " + d.Name + ": tap Profile Downloaded, then Install")
 				})
 			})
@@ -486,11 +489,113 @@ func (a *App) selectedDevice() (device.Device, bool) {
 	return device.Device{}, false
 }
 
-// setStatus writes the status line and gives it as many rows as the text needs at the current
-// width (capped), so a long error is wrapped instead of cut at the right edge.
+// setStatus puts up a message that stays until something newer replaces it; "" takes it down.
 func (a *App) setStatus(text string) {
-	if text == "" && time.Now().Before(a.flashUntil) {
-		text = " " + tview.Escape(a.flashText)
+	a.statusSeq++
+	a.message, a.messageSeq = text, a.statusSeq
+	a.renderStatus()
+}
+
+var flashHold, errorHold = 4 * time.Second, 6 * time.Second
+
+func (a *App) flash(msg string) {
+	a.statusSeq++
+	a.flashText, a.flashSeq, a.flashUntil = " "+tview.Escape(msg), a.statusSeq, time.Now().Add(flashHold)
+	a.message = ""
+	a.renderStatus()
+	time.AfterFunc(flashHold, func() { a.tv.QueueUpdateDraw(a.renderStatus) })
+}
+
+// flashErr shows a failure. It is held the way a flash is, so a background job finishing does not
+// take it down, and then stays as the message, because an error that vanishes leaves the user
+// thinking the key did nothing. clearStatus is how a caller wipes it deliberately.
+func (a *App) flashErr(err error) {
+	a.statusSeq++
+	text := " [red]" + tview.Escape(err.Error()) + "[-]"
+	a.flashText, a.flashSeq, a.flashUntil = text, a.statusSeq, time.Now().Add(errorHold)
+	a.message, a.messageSeq = text, a.statusSeq
+	a.renderStatus()
+}
+
+// clearStatus empties the status line and drops whatever was being held there.
+func (a *App) clearStatus() {
+	a.flashText, a.flashUntil = "", time.Time{}
+	a.message = ""
+	a.renderStatus()
+}
+
+type spinJob struct {
+	id      int
+	caption string
+}
+
+// startSpinner shows the running mascot until stopSpinner(id); concurrent jobs share one runner,
+// captioned by the newest job that has a caption. A job starting replaces the standing message.
+func (a *App) startSpinner(caption string) int {
+	a.statusSeq++
+	id := a.statusSeq
+	a.spinJobs = append(a.spinJobs, spinJob{id: id, caption: caption})
+	a.message = ""
+	if a.spinStop == nil {
+		a.spinStop = make(chan struct{})
+		go a.spin(a.spinStop)
+	}
+	a.renderStatus()
+	return id
+}
+
+func (a *App) spin(stop chan struct{}) {
+	t := time.NewTicker(spinnerInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			a.tv.QueueUpdateDraw(func() {
+				if a.spinStop != stop {
+					return
+				}
+				a.spinFrame++
+				a.renderStatus()
+			})
+		}
+	}
+}
+
+func (a *App) stopSpinner(id int) {
+	i := slices.IndexFunc(a.spinJobs, func(j spinJob) bool { return j.id == id })
+	if i < 0 {
+		return
+	}
+	a.spinJobs = slices.Delete(a.spinJobs, i, i+1)
+	if len(a.spinJobs) == 0 {
+		close(a.spinStop)
+		a.spinStop = nil
+	}
+	a.renderStatus()
+}
+
+// renderStatus draws whichever of the held flash, the runner and the message was written last,
+// and gives the line as many rows as that needs at the current width (capped), so a long error is
+// wrapped instead of cut at the right edge.
+func (a *App) renderStatus() {
+	text, seq := "", 0
+	if a.message != "" {
+		text, seq = a.message, a.messageSeq
+	}
+	if n := len(a.spinJobs); n > 0 && a.spinJobs[n-1].id > seq {
+		caption := ""
+		for _, j := range slices.Backward(a.spinJobs) {
+			if j.caption != "" {
+				caption = j.caption
+				break
+			}
+		}
+		text, seq = renderRunner(a.spinFrame, caption), a.spinJobs[n-1].id
+	}
+	if a.flashText != "" && time.Now().Before(a.flashUntil) && a.flashSeq >= seq {
+		text = a.flashText
 	}
 	a.status.SetText(text)
 	_, _, width, _ := a.status.GetInnerRect()
@@ -507,95 +612,14 @@ func (a *App) setStatus(text string) {
 	a.root.ResizeItem(a.status, rows, 0)
 }
 
-// startSpinner shows the running mascot next to msg until stopSpinner; nested async calls share one runner.
-func (a *App) startSpinner(msg string) {
-	a.busy++
-	if msg != "" {
-		a.spinMsg = msg
-	}
-	if a.spinStop != nil {
-		a.setStatus(renderRunner(a.spinFrame, a.spinMsg))
-		return
-	}
-	a.spinStop = make(chan struct{})
-	stop := a.spinStop
-	a.setStatus(renderRunner(a.spinFrame, a.spinMsg))
-	go func() {
-		t := time.NewTicker(spinnerInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				a.tv.QueueUpdateDraw(func() {
-					if a.spinStop == nil {
-						return
-					}
-					a.spinFrame++
-					a.setStatus(renderRunner(a.spinFrame, a.spinMsg))
-				})
-			}
-		}
-	}()
-}
-
-func (a *App) stopSpinner() {
-	if a.busy > 0 {
-		a.busy--
-	}
-	if a.busy > 0 || a.spinStop == nil {
-		return
-	}
-	close(a.spinStop)
-	a.spinStop = nil
-	a.spinMsg = ""
-	// a job finishing takes the runner down but must not take a message with it
-	a.setStatus("")
-}
-
-func (a *App) flash(msg string) {
-	a.flashText, a.flashUntil = msg, time.Now().Add(4*time.Second)
-	a.setStatus(" " + tview.Escape(msg))
-	go func() {
-		time.Sleep(4 * time.Second)
-		a.tv.QueueUpdateDraw(func() {
-			if a.flashText == msg {
-				a.flashText, a.flashUntil = "", time.Time{}
-			}
-			if strings.TrimSpace(a.status.GetText(true)) == msg {
-				a.setStatus("")
-			}
-		})
-	}()
-}
-
-// flashErr shows a failure. It holds the message the way flash does, because any background job
-// finishing afterwards clears the status line, and an error that vanishes leaves the user thinking
-// the key did nothing. clearStatus is how a caller wipes it deliberately.
-func (a *App) flashErr(err error) {
-	a.flashText, a.flashUntil = err.Error(), time.Now().Add(6*time.Second)
-	a.setStatus(" [red]" + tview.Escape(err.Error()) + "[-]")
-}
-
-// clearStatus empties the status line and drops whatever was being held there.
-func (a *App) clearStatus() {
-	a.flashText, a.flashUntil = "", time.Time{}
-	a.setStatus("")
-}
-
-// work must not touch tview; only then runs on the UI goroutine. Whatever the caller just put in
-// the status line ("booting X...") rides along as the runner's caption.
-func (a *App) async(work func() error, then func()) {
-	msg := strings.TrimSpace(a.status.GetText(true))
-	if a.spinStop != nil {
-		msg = ""
-	}
-	a.startSpinner(msg)
+// work must not touch tview; only then runs on the UI goroutine. caption shows next to the runner
+// while work runs; "" leaves the runner uncaptioned.
+func (a *App) async(caption string, work func() error, then func()) {
+	id := a.startSpinner(caption)
 	go func() {
 		err := work()
 		a.tv.QueueUpdateDraw(func() {
-			a.stopSpinner()
+			a.stopSpinner(id)
 			if err != nil {
 				a.flashErr(err)
 				return
@@ -701,7 +725,7 @@ func (a *App) promptPath(label, initial string, onDone func(string)) {
 }
 
 func (a *App) sendKey(d device.Device, key device.Key) {
-	a.async(func() error { return a.m.SendKey(a.ctx, d, key) }, func() { a.flash(string(key) + " sent to " + d.Name) })
+	a.async("", func() error { return a.m.SendKey(a.ctx, d, key) }, func() { a.flash(string(key) + " sent to " + d.Name) })
 }
 
 // Only the focused button is painted (dodger blue, black bold); idle ones are plain dim text, so one

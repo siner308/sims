@@ -35,10 +35,9 @@ func (v *imagesView) Hints() []hint {
 }
 
 func (v *imagesView) Refresh() {
-	v.app.setStatus(" loading images...")
 	var rows []sims.PlatformImage
 	var listErr error
-	v.app.async(func() error {
+	v.app.async(" loading images...", func() error {
 		rows, listErr = v.app.m.Images(v.app.ctx)
 		return nil
 	}, func() {
@@ -46,8 +45,6 @@ func (v *imagesView) Refresh() {
 		v.render()
 		if listErr != nil {
 			v.app.flashErr(listErr)
-		} else {
-			v.app.setStatus("")
 		}
 	})
 }
@@ -117,8 +114,7 @@ func (v *imagesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 		v.app.confirm(fmt.Sprintf("install %s?", row.ID), func() {
-			v.app.setStatus(" installing " + row.ID + " (this can take minutes)...")
-			v.app.async(func() error { return v.app.m.InstallImage(v.app.ctx, row) }, func() {
+			v.app.async(" installing "+row.ID+" (this can take minutes)...", func() error { return v.app.m.InstallImage(v.app.ctx, row) }, func() {
 				v.app.flash("installed " + row.ID)
 				v.Refresh()
 			})
@@ -141,7 +137,7 @@ func (v *imagesView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 
 func (v *imagesView) createFrom(img sims.PlatformImage) {
 	var types []device.DeviceType
-	v.app.async(func() error {
+	v.app.async("", func() error {
 		var err error
 		types, err = v.app.m.DeviceTypes(v.app.ctx, img.Platform)
 		return err
@@ -233,9 +229,8 @@ func newCreateView(a *App, img sims.PlatformImage, types []device.DeviceType) *c
 			}
 			hw = &h
 		}
-		a.setStatus(" creating and booting " + name + "...")
 		var created device.Device
-		a.async(func() error {
+		a.async(" creating and booting "+name+"...", func() error {
 			d, err := a.m.Create(a.ctx, img, name, deviceType, hw)
 			if err != nil {
 				return err
@@ -463,7 +458,7 @@ func newHardwareView(a *App, d device.Device, current device.Hardware) *hardware
 			a.flashErr(err)
 			return
 		}
-		a.async(func() error { return a.m.SetHardware(a.ctx, d, hw) }, func() {
+		a.async("", func() error { return a.m.SetHardware(a.ctx, d, hw) }, func() {
 			msg := "saved hardware of " + d.Name
 			if d.Running() {
 				msg += " (takes effect after the next boot)"

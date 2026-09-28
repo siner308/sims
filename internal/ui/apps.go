@@ -49,16 +49,14 @@ func (v *appsView) Hints() []hint {
 }
 
 func (v *appsView) Refresh() {
-	v.app.setStatus(" loading apps...")
 	var apps []device.App
-	v.app.async(func() error {
+	v.app.async(" loading apps...", func() error {
 		var err error
 		apps, err = v.app.m.Apps(v.app.ctx, v.dev)
 		return err
 	}, func() {
 		v.apps = apps
 		v.render()
-		v.app.setStatus("")
 	})
 }
 
@@ -120,7 +118,7 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 	switch {
 	case ev.Key() == tcell.KeyEnter:
 		if a, ok := v.selected(); ok {
-			v.app.async(func() error { return v.app.m.LaunchApp(v.app.ctx, v.dev, a.BundleID) }, func() {
+			v.app.async("", func() error { return v.app.m.LaunchApp(v.app.ctx, v.dev, a.BundleID) }, func() {
 				v.app.flash("launched " + a.BundleID)
 			})
 		}
@@ -137,7 +135,7 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 		if a, ok := v.selected(); ok {
 			v.app.confirmDangerous(fmt.Sprintf("uninstall %s?", a.BundleID), func() {
-				v.app.async(func() error { return v.app.m.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {
+				v.app.async("", func() error { return v.app.m.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {
 					v.app.flash("uninstalled " + a.BundleID)
 					v.Refresh()
 				})
@@ -201,8 +199,7 @@ func (v *appsView) watchWithApp() {
 // The OS dialog runs off the UI goroutine; a platform without one falls back to the TUI picker.
 func (v *appsView) pickAndInstall(native bool) {
 	install := func(path string) {
-		v.app.setStatus(" installing " + path + "...")
-		v.app.async(func() error { return v.app.m.InstallApp(v.app.ctx, v.dev, path) }, func() {
+		v.app.async(" installing "+path+"...", func() error { return v.app.m.InstallApp(v.app.ctx, v.dev, path) }, func() {
 			v.app.flash("installed " + path)
 			v.Refresh()
 		})

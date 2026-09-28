@@ -45,8 +45,8 @@ type logsView struct {
 	following bool
 	// stepped is set once the reader has moved the cursor themselves, after which it stays put.
 	stepped bool
-	// waiting is set while the runner shows in the status bar; only the UI goroutine touches it
-	waiting bool
+	// waiting is the runner job while it shows in the status bar, 0 when none; only the UI goroutine touches it
+	waiting int
 
 	// timeline holds both streams in time order while traffic is mixed in; nil means logs alone.
 	timeline *timeline
@@ -534,8 +534,7 @@ func (v *logsView) Refresh() {
 		v.redraw()
 	}
 	v.text.ScrollToEnd()
-	v.waiting = true
-	v.app.startSpinner(v.waitMsg())
+	v.waiting = v.app.startSpinner(v.waitMsg())
 	go v.pump(out)
 	go func() {
 		err := cmd.Wait()
@@ -562,9 +561,9 @@ func (v *logsView) waitMsg() string {
 
 // settle takes the runner down once the stream produced something or went away.
 func (v *logsView) settle() {
-	if v.waiting {
-		v.waiting = false
-		v.app.stopSpinner()
+	if v.waiting != 0 {
+		v.app.stopSpinner(v.waiting)
+		v.waiting = 0
 	}
 }
 
@@ -870,7 +869,7 @@ func (v *logsView) stopCapture() {
 	v.app.confirm(fmt.Sprintf("stop capturing %s?\n\n%s", d.Name, stopNote(d)), func() {
 		v.unwatchTraffic()
 		v.session, v.timeline = nil, nil
-		v.app.async(func() error { return v.app.m.StopCapture(d) }, func() {
+		v.app.async("", func() error { return v.app.m.StopCapture(d) }, func() {
 			v.app.flash("stopped capturing " + d.Name + "; the log keeps running")
 			v.app.drawHeader()
 			v.Refresh()

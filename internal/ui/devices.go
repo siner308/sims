@@ -96,10 +96,9 @@ func (v *devicesView) Hints() []hint {
 }
 
 func (v *devicesView) Refresh() {
-	v.app.setStatus(" loading devices...")
 	var all []device.Device
 	var listErr error
-	v.app.async(func() error {
+	v.app.async(" loading devices...", func() error {
 		all, listErr = v.app.m.Devices(v.app.ctx)
 		return nil
 	}, func() {
@@ -107,8 +106,6 @@ func (v *devicesView) Refresh() {
 		v.render()
 		if listErr != nil {
 			v.app.flashErr(listErr)
-		} else {
-			v.app.setStatus("")
 		}
 		v.pollTransitions()
 	})
@@ -348,9 +345,8 @@ func (v *devicesView) openApps() {
 		return
 	}
 	v.app.confirm(fmt.Sprintf("%s is not running. Boot it and open apps?", d.Name), func() {
-		v.app.setStatus(" booting " + d.Name + "...")
 		var booted device.Device
-		v.app.async(func() error {
+		v.app.async(" booting "+d.Name+"...", func() error {
 			if err := v.app.m.Boot(v.app.ctx, d); err != nil {
 				return err
 			}
@@ -371,13 +367,12 @@ func (v *devicesView) connect() {
 	if !ok {
 		return
 	}
+	caption := " " + d.Name + ": switching to adb over wifi..."
 	if d.Platform == device.PlatformIOS {
-		v.app.setStatus(" connecting to " + d.Name + " (same wifi, unlocked, developer mode on)...")
-	} else {
-		v.app.setStatus(" " + d.Name + ": switching to adb over wifi...")
+		caption = " connecting to " + d.Name + " (same wifi, unlocked, developer mode on)..."
 	}
 	var note string
-	v.app.async(func() error {
+	v.app.async(caption, func() error {
 		var err error
 		note, err = v.app.m.Connect(v.app.ctx, d)
 		return err
@@ -392,8 +387,7 @@ func (v *devicesView) disconnect() {
 	if !ok {
 		return
 	}
-	v.app.setStatus(" " + d.Name + ": disconnecting...")
-	v.app.async(func() error { return v.app.m.Disconnect(v.app.ctx, d) }, func() {
+	v.app.async(" "+d.Name+": disconnecting...", func() error { return v.app.m.Disconnect(v.app.ctx, d) }, func() {
 		v.app.flash(d.Name + ": disconnected")
 		v.Refresh()
 	})
@@ -405,7 +399,7 @@ func (v *devicesView) editHardware() {
 		return
 	}
 	var current device.Hardware
-	v.app.async(func() error {
+	v.app.async("", func() error {
 		var err error
 		current, err = v.app.m.Hardware(v.app.ctx, d)
 		return err
@@ -424,8 +418,7 @@ func (v *devicesView) pair() {
 		return
 	}
 	v.app.confirm(fmt.Sprintf("pair %s?\n\n%s", d.Name, pairingGuide), func() {
-		v.app.setStatus(" pairing " + d.Name + ": accept the prompt on the phone (up to 2 minutes)...")
-		v.app.async(func() error { return v.app.m.Pair(v.app.ctx, d) }, func() {
+		v.app.async(" pairing "+d.Name+": accept the prompt on the phone (up to 2 minutes)...", func() error { return v.app.m.Pair(v.app.ctx, d) }, func() {
 			v.app.flash("paired " + d.Name + "; unplug it and use w to reach it over wifi")
 			v.Refresh()
 		})
@@ -520,8 +513,7 @@ func (v *devicesView) act(verb string, dangerous bool, fn func(context.Context, 
 		return
 	}
 	run := func() {
-		v.app.setStatus(fmt.Sprintf(" %s %s...", verb, d.Name))
-		v.app.async(func() error { return fn(v.app.ctx, d) }, func() {
+		v.app.async(fmt.Sprintf(" %s %s...", verb, d.Name), func() error { return fn(v.app.ctx, d) }, func() {
 			v.app.flash(fmt.Sprintf("%s %s: ok", verb, d.Name))
 			v.Refresh()
 		})

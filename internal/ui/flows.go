@@ -502,7 +502,7 @@ func (v *flowsView) mixWithLog() {
 func (v *flowsView) stopCapture() {
 	v.app.confirm(fmt.Sprintf("stop capturing %s?\n\n%s", v.dev.Name, stopNote(v.dev)), func() {
 		v.close()
-		v.app.async(func() error { return v.app.m.StopCapture(v.dev) }, func() {
+		v.app.async("", func() error { return v.app.m.StopCapture(v.dev) }, func() {
 			v.app.flash("stopped capturing " + v.dev.Name)
 			v.app.pop()
 		})
@@ -527,7 +527,7 @@ func (v *flowsView) saveHAR() {
 			return
 		}
 		flows := v.visible()
-		v.app.async(func() error { return writeHAR(target, v.app.version, flows) }, func() {
+		v.app.async("", func() error { return writeHAR(target, v.app.version, flows) }, func() {
 			v.app.flash(fmt.Sprintf("wrote %d flows to %s", countHAR(flows), target))
 		})
 	})

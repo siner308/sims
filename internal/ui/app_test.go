@@ -1140,7 +1140,7 @@ func TestSpinner_RunsWhileBusyAndClears(t *testing.T) {
 		t.Error("runner frame did not advance")
 	}
 	dv := a.stack[0].(*devicesView)
-	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 && a.busy == 0 })
+	waitFor(t, a, 5*time.Second, func() bool { return dv.table.GetRowCount() == 2 && len(a.spinJobs) == 0 })
 	onUI(a, func() { text, rows = a.status.GetText(true), a.statusRows })
 	if strings.Contains(text, ">_ >_") || rows != 1 {
 		t.Errorf("runner should be gone after loading: rows=%d text=%q", rows, text)
@@ -1177,12 +1177,12 @@ func TestLogsView_RunnerUntilFirstLine(t *testing.T) {
 	onUI(a, func() {
 		lv = newLogsView(a, device.Device{Name: "dev", Platform: device.PlatformAndroid, State: device.StateBooted}, nil)
 		a.push(lv)
-		busy = a.busy
+		busy = len(a.spinJobs)
 	})
 	if busy == 0 {
 		t.Fatal("the runner should show while the stream is silent")
 	}
-	waitFor(t, a, 5*time.Second, func() bool { return a.busy == 0 && strings.Contains(lv.text.GetText(true), "hello") })
+	waitFor(t, a, 5*time.Second, func() bool { return len(a.spinJobs) == 0 && strings.Contains(lv.text.GetText(true), "hello") })
 	onUI(a, func() { lv.stop() })
 }
 
@@ -1359,7 +1359,7 @@ func TestCreateView_CreateBootsAndSelectsTheNewDevice(t *testing.T) {
 	waitFor(t, a, 5*time.Second, func() bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		return len(p.booted) == 1 && len(a.stack) == 1 && a.busy == 0
+		return len(p.booted) == 1 && len(a.stack) == 1 && len(a.spinJobs) == 0
 	})
 	p.mu.Lock()
 	booted := append([]string(nil), p.booted...)
