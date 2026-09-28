@@ -409,8 +409,8 @@ func (s *Session) Stop() error {
 	return errors.Join(errs...)
 }
 
-// DefaultCertDir is where the root certificate, its key and the in-flight note live between runs.
-// SIMS_PROXY_DIR moves all three, which a test uses to stay off the real one. The error is passed on
+// DefaultCertDir is where the root certificate, its key, the in-flight notes and the phone records
+// live between runs. SIMS_PROXY_DIR moves all of them, which a test uses to stay off the real one. The error is passed on
 // rather than falling back to a temp directory: a CA key belongs in the user's own cache, not
 // somewhere every account on the machine can reach.
 func DefaultCertDir() (string, error) {

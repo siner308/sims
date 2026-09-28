@@ -61,7 +61,7 @@ type entry struct {
 	seq int
 	// text is the log line, for entryLog.
 	text string
-	// flow is the exchange, for entryRequest and entryResponse.
+	// flow is the exchange, for entryExchange.
 	flow proxy.Flow
 }
 
