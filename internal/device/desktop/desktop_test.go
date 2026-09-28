@@ -285,14 +285,22 @@ func TestBrokenAliasesAreNotListed(t *testing.T) {
 		if a.Running {
 			continue
 		}
+		// the same name can be a real bundle in one folder and a broken alias in another,
+		// and the row comes from the real one, so only a name with no bundle that opens is wrong
+		broken, opens := false, false
 		for _, dir := range []string{"/Applications", homeApps(t)} {
 			bundle := filepath.Join(dir, a.Name+".app")
 			if _, err := os.Lstat(bundle); err != nil {
 				continue
 			}
 			if _, err := os.Stat(bundle); err != nil {
-				t.Errorf("%s is a broken alias but is listed", a.Name)
+				broken = true
+			} else {
+				opens = true
 			}
+		}
+		if broken && !opens {
+			t.Errorf("%s is a broken alias but is listed", a.Name)
 		}
 	}
 }
