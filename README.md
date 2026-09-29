@@ -324,7 +324,7 @@ sims skill > SKILL.md                   # for any other agent
 | apps | `l` | logs of the selected app only (android: `logcat --pid`, so the app must be running; ios: `log stream --predicate`) |
 | apps | `s` / `/` | toggle preinstalled apps (hidden by default) / filter |
 | picker | `enter` `backspace` `~` `d` `.` `t` `/` | open or pick, parent, home, Downloads, hidden files, type a path (tab completes), filter |
-| logs | `/` `c` `p` `w` `g` `shift+g` | filter, clear, pause, toggle line wrap (on by default), top, bottom |
+| logs | `/` `c` `p` `w` `g` `shift+g` `s` | filter, clear, pause, toggle line wrap (on by default), top, bottom, save every line the view holds (the last 5000, filter or not) to a file for whoever has to read it |
 | logs, traffic | `t` / `l` | add or remove the traffic layer / the log layer; they are one stream and the last layer stays |
 | logs+traffic | `n` / `shift+n` / `o` / `shift+o` | step to the next exchange, the previous one, open the selected one (headers, then body, then closed), open or close every exchange |
 | logs+traffic | `enter` / `e` / `ctrl+k` | read the selected exchange in `$PAGER` / open it in `$EDITOR` / stop the capture and keep the log |

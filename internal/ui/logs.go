@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -110,7 +111,7 @@ func (v *logsView) Primitive() tview.Primitive { return v.text }
 func (v *logsView) Hints() []hint {
 	hints := []hint{
 		{"/", "filter"}, {"c", "clear"}, {"p", "pause"}, {"f", v.followHint()}, {"w", "toggle wrap"},
-		{"g", "top"}, {"shift+g", "bottom"},
+		{"g", "top"}, {"shift+g", "bottom"}, {"s", "save the log to a file"},
 	}
 	layers := []hint{{"t", v.layerHint(v.mixing(), "traffic")}, {"l", v.layerHint(v.showingLog(), "log")}}
 	if !v.mixing() {
@@ -807,6 +808,8 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		}
 	case 'r':
 		v.Refresh()
+	case 's':
+		v.saveLog()
 	case 't':
 		v.toggleTraffic()
 	case 'l':
@@ -861,6 +864,45 @@ func (v *logsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 		return ev
 	}
 	return nil
+}
+
+// The file carries every line held, filter or not: it is for whoever has to read the whole thing, and the filter was for finding a place in it.
+func (v *logsView) saveLog() {
+	name := sanitize(v.dev.Name)
+	if v.only != nil {
+		name += "-" + sanitize(v.only.Name)
+	}
+	path := filepath.Join(homeDir(), fmt.Sprintf("%s-%s.log", name, time.Now().Format("20060102-150405")))
+	v.app.prompt("save log to:", path, func(target string) {
+		if target == "" {
+			return
+		}
+		v.mu.Lock()
+		lines := append([]string(nil), v.lines...)
+		v.mu.Unlock()
+		v.app.async("", func() error { return writeLines(target, lines) }, func() {
+			v.app.flash(fmt.Sprintf("wrote %d log lines to %s", len(lines), target))
+		})
+	})
+}
+
+func writeLines(path string, lines []string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	for _, l := range lines {
+		if _, err := w.WriteString(l + "\n"); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // stopCapture ends the capture and leaves the log running on its own.
