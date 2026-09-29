@@ -128,6 +128,7 @@ func TestInstallableExts(t *testing.T) {
 		{device.Device{Platform: device.PlatformAndroid, Kind: device.KindPhysical}, []string{".apk"}},
 		{device.Device{Platform: device.PlatformIOS, Kind: device.KindVirtual}, []string{".app", ".ipa"}},
 		{device.Device{Platform: device.PlatformIOS, Kind: device.KindPhysical}, []string{".app"}},
+		{device.Device{Platform: device.PlatformDesktop, Kind: device.KindHost}, []string{".ipa", ".app"}},
 	}
 	for _, c := range cases {
 		if got := installableExts(c.d); !slices.Equal(got, c.want) {

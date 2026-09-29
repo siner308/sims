@@ -113,8 +113,12 @@ func runningApps(ctx context.Context) ([]device.App, error) {
 			if !cur.System {
 				cur.System = isSystemPath(path)
 			}
-			if _, version := bundleInfo(path); version != "" {
-				cur.Version = version
+			if facts := bundleInfo(path); facts.version != "" {
+				cur.Version = facts.version
+			}
+			// a running iPad app is reported from its translocated copy, whose path keeps the wrapper's layout
+			if strings.Contains(path, "/Wrapper/") {
+				cur.Source = sourceIPad
 			}
 		}
 	}
@@ -141,59 +145,86 @@ func installedApps(ctx context.Context) []device.App {
 				continue
 			}
 			name := strings.TrimSuffix(filepath.Base(bundle), ".app")
-			id, version := bundleInfo(bundle)
-			if id == "" {
+			facts := bundleInfo(bundle)
+			if facts.id == "" {
 				// an alias or a bundle whose Info.plist cannot be read still deserves a row; the
 				// name is what a reader recognises, and a path in the id column is noise
-				id = "app:" + name
+				facts.id = "app:" + name
 			}
-			apps = append(apps, device.App{
-				BundleID: id,
+			a := device.App{
+				BundleID: facts.id,
 				Name:     name,
-				Version:  version,
+				Version:  facts.version,
 				Process:  name,
 				Source:   "installed",
 				System:   isSystemPath(bundle),
-			})
+			}
+			// an iPad app's executable rarely matches its display name ("CookieRun: Crumble" runs as CookieRunCrumble), and the log is filtered by the former
+			if isWrapper(bundle) {
+				a.Source = sourceIPad
+				if facts.executable != "" {
+					a.Process = facts.executable
+				}
+			}
+			apps = append(apps, a)
 		}
 	}
 	return apps
 }
 
-// bundleInfo reads an app's identifier and version from its Info.plist. An alias to a volume that
-// is not mounted, and anything else unreadable, comes back empty rather than as an error: the app
-// is still on the machine and still belongs in the list.
+const sourceIPad = "ipad"
+
+type bundleFacts struct {
+	id, version, executable string
+}
+
+// An alias to a volume that is not mounted, and anything else unreadable, comes back empty rather than as an error:
+// the app is still on the machine and still belongs in the list.
 //
-// A Mac app keeps the plist in Contents; an iPhone app running on this Mac is a wrapper whose real
-// bundle sits under Wrapper, and reading only the first would leave it with no identifier and a
-// second row of its own next to the one lsappinfo already reported.
-func bundleInfo(bundle string) (id, version string) {
+// A Mac app keeps the plist in Contents; an iPhone app running on this Mac is a wrapper whose real bundle sits under Wrapper,
+// and reading only the first would leave it with no identifier and a second row of its own next to the one lsappinfo already reported.
+func bundleInfo(bundle string) bundleFacts {
 	for _, path := range plistCandidates(bundle) {
 		body, err := readPlistXML(path)
 		if err != nil {
 			continue
 		}
-		if id = plistString(body, "CFBundleIdentifier"); id != "" {
-			return id, plistString(body, "CFBundleShortVersionString")
+		if id := plistString(body, "CFBundleIdentifier"); id != "" {
+			return bundleFacts{id: id, version: plistString(body, "CFBundleShortVersionString"), executable: plistString(body, "CFBundleExecutable")}
 		}
 	}
-	return "", ""
+	return bundleFacts{}
 }
 
-// readPlistXML returns the plist as XML. Apple ships most of its own apps with the binary form,
-// which cannot be read as text, so plutil converts it; a plist that is already XML is read directly
-// and costs no process.
 func readPlistXML(path string) ([]byte, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	return plistXML(body)
+}
+
+// Apple ships most of its own apps with a binary plist, which cannot be read as text, so plutil converts it;
+// a plist that is already XML is returned as is and costs no process.
+func plistXML(body []byte) ([]byte, error) {
 	if !bytes.HasPrefix(body, []byte("bplist")) {
 		return body, nil
 	}
+	f, err := os.CreateTemp("", "sims-plist-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(body); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "plutil", "-convert", "xml1", "-o", "-", path).Output()
+	return exec.CommandContext(ctx, "plutil", "-convert", "xml1", "-o", "-", f.Name()).Output()
 }
 
 // plistCandidates is where an Info.plist can live: a Mac app's Contents, then the inner bundle of

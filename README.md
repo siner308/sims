@@ -132,12 +132,9 @@ What a phone will only let its owner do, sims lists as numbered taps before the 
 That happens once per phone: the profile names a fixed port (9797), sims records what the phone was given, and every later capture on the same wifi with the same certificate finds it already there and installs nothing. The profile stays after a capture, because nothing on the Mac can remove it, so the phone keeps sending its traffic here: the TUI relays it untouched while open, `sims proxy standby <phone>` does the same from a terminal, and `--setup` sends the profile again when the phone lost it or moved to another wifi.
 The certificate is made once and kept, so the second capture on a device needs no setup at all.
 
-The machine sims runs on is in the list too, as a `desktop` device. `enter` opens what is running
-here and what is installed, with the process name that ties each app to a row in a capture, and
-`enter` there launches one. `l` on one of them follows that app's own log, the way it does for a
-simulator. It boots nothing and installs nothing, and says so in a line when asked, but its traffic
-and its system log are the same two things sims shows for everything else: `t` captures what the apps on this Mac are sending, with each row named
-by the process behind it. Trusting the certificate there is a command rather than part of starting a
+The machine sims runs on is in the list too, as a `desktop` device. `enter` opens what is running here and what is installed, with the process name that ties each app to a row in a capture, and `enter` there launches one. `l` on one of them follows that app's own log, the way it does for a simulator. It boots nothing and says so in a line when asked, but its traffic and its system log are the same two things sims shows for everything else: `t` captures what the apps on this Mac are sending, with each row named by the process behind it.
+
+An iPhone or iPad app runs on an Apple silicon Mac the way Xcode's "My Mac (Designed for iPad)" destination runs it, and sims treats one as the app it is. `i` on this machine installs an `.ipa`, or an `.app` built for a device, through macOS's own iOS App Installer; the row it gets says `ipad` in its source column and carries the process name its log is filtered by; `ctrl+u` removes it through the Finder, since the installer writes it as root. Before installing, sims reads the build's provisioning profile and refuses one this Mac is not provisioned for, or whose profile has expired: the installer accepts both, and an expired one was seen to install and then fail to launch with an error naming no cause. An App Store or TestFlight build carries no profile and is left to the installer. A Mac app runs from wherever it sits, so sims does not install one. Trusting the certificate there is a command rather than part of starting a
 capture, because macOS puts up an authorisation panel: `sims proxy ca localhost --install`. The
 capture reads the keychain and only asks when the root is missing, so a machine already set up is
 not sent to run it again. Windows lists the same way and trusts through `certutil -user`.
@@ -247,7 +244,7 @@ sims device pair <host:port> <code>         # Android 11+ wireless debugging
 sims device disconnect <device>             # adb disconnect
 
 sims app list <device> [--all]              # --all includes preinstalled apps; running apps sort first
-sims app install <device> <path>            # .apk on android; .app or .ipa on a simulator; .app on an iPhone. A device-built ipa is refused for a simulator, which installs one and then cannot launch it
+sims app install <device> <path>            # .apk on android; .app or .ipa on a simulator; .app on an iPhone; an iPad build (.ipa or .app) on localhost. A device-built ipa is refused for a simulator, which installs one and then cannot launch it; a build this Mac is not provisioned for is refused for localhost for the same reason
 sims app uninstall | launch <device> <bundle>
 sims app logs <device> <bundle>             # android: the app must be running (logcat --pid)
 

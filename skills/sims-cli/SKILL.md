@@ -54,7 +54,7 @@ sims device pair <host:port> <code>         # Android 11+ wireless debugging
 sims device disconnect <device>             # adb disconnect
 
 sims app list <device> [--all]              # --all includes system/preinstalled apps; running apps sort first
-sims app install <device> <path>            # .apk (android); .app or .ipa on a simulator; .app on an iPhone
+sims app install <device> <path>            # .apk (android); .app or .ipa on a simulator; .app on an iPhone; an iPad build (.ipa or device .app) on localhost, via macOS's iOS App Installer
 sims app uninstall <device> <bundle-id>     # no confirmation
 sims app launch <device> <bundle-id>
 sims app logs <device> <bundle-id-or-name>  # android: the app must already be running

@@ -72,12 +72,13 @@ func (p *Provider) Shutdown(context.Context, device.Device) error { return notSu
 func (p *Provider) Erase(context.Context, device.Device) error    { return notSupported("erase") }
 func (p *Provider) Delete(context.Context, device.Device) error   { return notSupported("delete") }
 
-func (p *Provider) InstallApp(context.Context, device.Device, string) error {
-	return notSupported("install an app on")
+// InstallApp puts an iPhone or iPad app on this Mac, the one kind of app it installs the way a device does; a Mac app is run from wherever it sits.
+func (p *Provider) InstallApp(ctx context.Context, _ device.Device, path string) error {
+	return installApp(ctx, path)
 }
 
-func (p *Provider) UninstallApp(context.Context, device.Device, string) error {
-	return notSupported("uninstall an app from")
+func (p *Provider) UninstallApp(ctx context.Context, _ device.Device, bundleID string) error {
+	return uninstallApp(ctx, bundleID)
 }
 
 // LaunchApp opens an app on this machine, which is the one app action a desktop can honestly do.

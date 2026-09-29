@@ -39,7 +39,7 @@ Three rules keep the layers apart:
 | [`internal/device`](../internal/device) | The `Provider` interface, the optional capability interfaces, and the plain types: `Device`, `App`, `Image`, `DeviceType`, `Hardware`, the proxy types. |
 | [`internal/device/android`](../internal/device/android) | adb, emulator, avdmanager, sdkmanager, aapt2. |
 | [`internal/device/ios`](../internal/device/ios) | `xcrun simctl`, `xcrun devicectl`, plutil, idevicesyslog. |
-| [`internal/device/desktop`](../internal/device/desktop) | The machine sims runs on, listed as one device (`localhost`) so its apps, log and traffic work like a phone's. |
+| [`internal/device/desktop`](../internal/device/desktop) | The machine sims runs on, listed as one device (`localhost`) so its apps, log and traffic work like a phone's. On macOS it also installs and removes iPad apps ("Designed for iPad") through the system's iOS App Installer and the Finder. |
 | [`internal/device/devicetest`](../internal/device/devicetest) | In-memory providers for testing the layers above. |
 | [`internal/sims`](../internal/sims) | `Manager`: routing, merged lists, device resolution, capability dispatch, capture and standby ownership. |
 | [`internal/capture`](../internal/capture) | One capture: starts a proxy, points the device at it, restores everything on stop, and keeps a journal so a killed capture can be undone later. |

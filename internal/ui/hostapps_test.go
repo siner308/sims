@@ -37,8 +37,8 @@ func TestEnterOnTheHostOpensItsApps(t *testing.T) {
 	}
 }
 
-// Installing onto this machine is not something sims does, so it is neither offered nor attempted.
-func TestHostAppsOfferNoInstall(t *testing.T) {
+// This machine installs an iPad app the way a device does, so the app list offers it alongside the traffic the machine is really here for.
+func TestHostAppsOfferInstallAndTraffic(t *testing.T) {
 	prov := &proxyProvider{fakeProvider: &fakeProvider{platform: device.PlatformDesktop, devices: []device.Device{hostDevice()}}}
 	a := New("test", sims.New(prov))
 	_, stop := runHeadless(t, a)
@@ -58,24 +58,20 @@ func TestHostAppsOfferNoInstall(t *testing.T) {
 		}
 	}
 	joined := strings.Join(keys, " ")
-	for _, gone := range []string{"install", "uninstall"} {
+	for _, want := range []string{"i=install", "ctrl+u=uninstall", "traffic"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the host app list does not offer %q: %s", want, joined)
+		}
+	}
+	// nothing here answers a home or back key
+	for _, gone := range []string{"h=home", "backspace=back", "o=overview"} {
 		if strings.Contains(joined, gone) {
 			t.Errorf("the host app list offers %q: %s", gone, joined)
 		}
 	}
-	if !strings.Contains(joined, "traffic") {
-		t.Errorf("the host app list does not offer its traffic: %s", joined)
-	}
-
-	// and pressing the key anyway says so rather than opening a file dialog
-	a.tv.QueueUpdate(func() { a.setStatus(""); av.onKey(tcell.NewEventKey(tcell.KeyRune, 'i', tcell.ModNone)) })
-	var status string
-	waitFor(t, a, 5*time.Second, func() bool {
-		status = a.status.GetText(true)
-		return strings.TrimSpace(status) != ""
-	})
-	if !strings.Contains(status, "does not install") {
-		t.Errorf("status = %q", status)
+	// the TUI picker offers an .ipa first, since that is how an iPad build arrives
+	if exts := installableExts(hostDevice()); len(exts) == 0 || exts[0] != ".ipa" {
+		t.Errorf("host install exts = %v", exts)
 	}
 }
 

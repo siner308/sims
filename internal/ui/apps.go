@@ -31,10 +31,12 @@ func newAppsView(a *App, d device.Device) *appsView {
 func (v *appsView) Name() string               { return "apps" }
 func (v *appsView) Primitive() tview.Primitive { return v.table }
 func (v *appsView) Hints() []hint {
-	// sims does not install onto the machine it runs on, so this list is what is here already
+	// what this machine installs is an iPad app; a Mac app runs from wherever it is, and nothing boots or sends keys here
 	if v.dev.IsHost() {
 		return []hint{
-			{"enter", "launch"}, {"t", "this machine's traffic"}, {"l", "logs of this app"},
+			{"enter", "launch"}, {"i", "install an ipad app (os dialog)"}, {"shift+i", "install (tui picker)"}, {"ctrl+u", "uninstall an ipad app"},
+			groupBreak,
+			{"t", "this machine's traffic"}, {"l", "logs of this app"},
 			groupBreak,
 			{"s", "toggle what ships with macos"}, {"/", "filter"},
 		}
@@ -123,16 +125,8 @@ func (v *appsView) onKey(ev *tcell.EventKey) *tcell.EventKey {
 			})
 		}
 	case ev.Rune() == 'i', ev.Rune() == 'I':
-		if v.dev.IsHost() {
-			v.app.flashErr(fmt.Errorf("sims does not install apps onto the machine it runs on"))
-			return nil
-		}
 		v.pickAndInstall(ev.Rune() == 'i')
 	case ev.Key() == tcell.KeyCtrlU:
-		if v.dev.IsHost() {
-			v.app.flashErr(fmt.Errorf("sims does not uninstall apps from the machine it runs on"))
-			return nil
-		}
 		if a, ok := v.selected(); ok {
 			v.app.confirmDangerous(fmt.Sprintf("uninstall %s?", a.BundleID), func() {
 				v.app.async("", func() error { return v.app.m.UninstallApp(v.app.ctx, v.dev, a.BundleID) }, func() {
@@ -230,10 +224,13 @@ func (v *appsView) pickAndInstall(native bool) {
 }
 
 // devicectl's install help names only .app bundles, while simctl takes a packaged .ipa as well.
+// This machine takes an iPad build in either form, and an .ipa is how one usually arrives.
 func installableExts(d device.Device) []string {
 	switch {
 	case d.Platform == device.PlatformAndroid:
 		return []string{".apk"}
+	case d.IsHost():
+		return []string{".ipa", ".app"}
 	case d.Kind == device.KindVirtual:
 		return []string{".app", ".ipa"}
 	}
