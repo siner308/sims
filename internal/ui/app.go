@@ -79,6 +79,7 @@ type App struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	version     string
+	hangs       *hangDumps
 	newVersion  string // release newer than version, once the startup check has found one
 	applyUpdate func(ctx context.Context, tag string) error
 	// editor is the one picked this session, so reading the next exchange does not ask again.
@@ -94,6 +95,7 @@ func New(version string, m *sims.Manager) *App {
 		ctx:         ctx,
 		cancel:      cancel,
 		version:     version,
+		hangs:       newHangDumps(),
 	}
 	a.build()
 	return a
@@ -163,6 +165,8 @@ func (a *App) Run() error {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
+	returned := make(chan struct{})
+	defer close(returned)
 	go func() {
 		if _, ok := <-signals; !ok {
 			return
@@ -170,7 +174,13 @@ func (a *App) Run() error {
 		// the UI is gone or going; put the machine back before the process does
 		a.m.StopAllCaptures()
 		a.tv.Stop()
+		select {
+		case <-returned:
+		case <-time.After(stopGrace):
+			a.leaveStuck()
+		}
 	}()
+	go a.watchUI(a.ctx, watchEvery, watchPatience)
 	a.startStandbys()
 	return a.tv.Run()
 }

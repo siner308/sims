@@ -139,6 +139,8 @@ capture, because macOS puts up an authorisation panel: `sims proxy ca localhost 
 capture reads the keychain and only asks when the root is missing, so a machine already set up is
 not sent to run it again. Windows lists the same way and trusts through `certutil -user`.
 
+If the screen stops answering for ten seconds, sims writes every goroutine's stack to `hang-<time>.txt` under the user cache directory (`~/Library/Caches/sims` on macOS), and ctrl+c then leaves after three seconds, naming that file, instead of waiting on a UI that cannot stop. Attach the file to a bug report.
+
 A capture puts every setting back when it stops, including on ctrl+c or a SIGTERM. When it cannot,
 because it was killed outright or the machine lost power, the record it wrote before changing
 anything is still there: the next capture, the next `sims` start and `sims proxy clean` each read

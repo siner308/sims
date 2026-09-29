@@ -357,7 +357,10 @@ func (p *Provider) LogCmd(ctx context.Context, d device.Device, app *device.App)
 	// the ring buffer holds ~100k lines on a busy emulator; the view keeps 5000, so do not ship the rest
 	args := []string{"-s", d.Serial, "logcat", "-v", "time", "-T", "2000"}
 	if app != nil {
-		out, err := run(ctx, p.sdk.adb(), "-s", d.Serial, "shell", "pidof", "-s", app.BundleID)
+		// this runs on the TUI's own goroutine when a log is opened, so an adb that stops answering must not take the screen with it
+		lookup, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		out, err := run(lookup, p.sdk.adb(), "-s", d.Serial, "shell", "pidof", "-s", app.BundleID)
 		pid := strings.TrimSpace(out)
 		if err != nil || pid == "" {
 			return nil, fmt.Errorf("%s is not running; launch it first (enter) and open logs again", app.BundleID)
